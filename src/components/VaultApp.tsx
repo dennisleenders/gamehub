@@ -770,9 +770,34 @@ function ScannerModal({ resolve, onResolved, onClose }: {
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
   const handledRef = useRef(false);
+  const lastFailedRef = useRef("");
+  const audioRef = useRef<AudioContext | null>(null);
   const [phase, setPhase] = useState<"scanning" | "looking" | "notfound" | "error">("scanning");
   const [note, setNote] = useState("");
   const [manual, setManual] = useState("");
+
+  // Short confirmation beep (synthesised, no asset) + a haptic buzz on phones,
+  // fired the instant a barcode is decoded — the "got it" feedback.
+  const beep = () => {
+    const ctx = audioRef.current;
+    if (ctx) {
+      try {
+        ctx.resume?.();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = 880;
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.008);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.2);
+      } catch { /* audio not available */ }
+    }
+    try { navigator.vibrate?.(60); } catch { /* no haptics */ }
+  };
 
   const lookup = async (raw: string) => {
     const code = raw.replace(/\D/g, "");
@@ -782,6 +807,7 @@ function ScannerModal({ resolve, onResolved, onClose }: {
     try {
       const r = await resolve(code);
       if (r?.title) { onResolved(r.title); return; }
+      lastFailedRef.current = code; // don't loop-beep the same unmatched barcode
       setNote(
         r?.error === "rate_limited" ? "Daily lookup limit reached — type the title below instead." :
         r?.error === "invalid" ? "That barcode looks invalid — re-check the digits." :
@@ -797,6 +823,13 @@ function ScannerModal({ resolve, onResolved, onClose }: {
 
   useEffect(() => {
     let active = true;
+    // Create + unlock the audio context now, while we're still close to the tap
+    // that opened the scanner — iOS only allows audio started from a gesture.
+    try {
+      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (Ctx) { audioRef.current = new Ctx(); audioRef.current.resume?.(); }
+    } catch { /* audio not available */ }
+
     const reader = new BrowserMultiFormatReader(BARCODE_HINTS, SCAN_OPTIONS);
     (async () => {
       try {
@@ -805,7 +838,10 @@ function ScannerModal({ resolve, onResolved, onClose }: {
           videoRef.current!,
           (result) => {
             if (!active || handledRef.current || !result) return;
-            lookup(result.getText());
+            const code = result.getText().replace(/\D/g, "");
+            if (code === lastFailedRef.current) return; // already tried, no match
+            beep();
+            lookup(code);
           }
         );
         if (active) controlsRef.current = controls;
@@ -814,7 +850,11 @@ function ScannerModal({ resolve, onResolved, onClose }: {
         if (active) setPhase("error");
       }
     })();
-    return () => { active = false; controlsRef.current?.stop(); };
+    return () => {
+      active = false;
+      controlsRef.current?.stop();
+      audioRef.current?.close().catch(() => {});
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
