@@ -35,9 +35,9 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
 
-  const resolveUpc = async (upc: string): Promise<{ title: string | null }> => {
+  const resolveUpc = async (upc: string): Promise<{ title: string | null; error?: string }> => {
     const r = await fetch("/api/upc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ upc }) });
-    if (!r.ok) return { title: null };
+    if (!r.ok) return { title: null, error: "network" };
     return r.json();
   };
 
@@ -745,12 +745,25 @@ function SettingsModal({ games, platforms, genres, onSave, onClose }: {
 
 // Restrict to the 1-D retail barcode symbologies a game case actually carries —
 // fewer formats means faster, more reliable decoding off a shaky phone camera.
-const BARCODE_HINTS = new Map([
+// TRY_HARDER spends more effort per frame, which matters for the small, dense
+// barcodes on Switch cartridge cases.
+const BARCODE_HINTS = new Map<DecodeHintType, any>([
   [DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.EAN_13, BarcodeFormat.EAN_8]],
+  [DecodeHintType.TRY_HARDER, true],
 ]);
 
+// ZXing defaults to a 500ms gap between decode attempts (≈2 tries/sec, feels
+// laggy). 80ms gives ~12 tries/sec for near-instant reads.
+const SCAN_OPTIONS = { delayBetweenScanAttempts: 80, delayBetweenScanSuccess: 250 };
+
+// Ask for a high-resolution rear-camera stream — small barcodes (Switch) need
+// the extra pixels to resolve; `ideal` degrades gracefully on weaker cameras.
+const SCAN_CONSTRAINTS: MediaStreamConstraints = {
+  video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+};
+
 function ScannerModal({ resolve, onResolved, onClose }: {
-  resolve: (upc: string) => Promise<{ title: string | null }>;
+  resolve: (upc: string) => Promise<{ title: string | null; error?: string }>;
   onResolved: (title: string) => void;
   onClose: () => void;
 }) {
@@ -758,6 +771,7 @@ function ScannerModal({ resolve, onResolved, onClose }: {
   const controlsRef = useRef<IScannerControls | null>(null);
   const handledRef = useRef(false);
   const [phase, setPhase] = useState<"scanning" | "looking" | "notfound" | "error">("scanning");
+  const [note, setNote] = useState("");
   const [manual, setManual] = useState("");
 
   const lookup = async (raw: string) => {
@@ -768,18 +782,26 @@ function ScannerModal({ resolve, onResolved, onClose }: {
     try {
       const r = await resolve(code);
       if (r?.title) { onResolved(r.title); return; }
-    } catch { /* fall through to not-found */ }
+      setNote(
+        r?.error === "rate_limited" ? "Daily lookup limit reached — type the title below instead." :
+        r?.error === "invalid" ? "That barcode looks invalid — re-check the digits." :
+        r?.error === "network" ? "Lookup failed (network) — try again." :
+        "No match in the barcode database — type the title below."
+      );
+    } catch {
+      setNote("Lookup failed — try again or type the title below.");
+    }
     setPhase("notfound");
     handledRef.current = false; // allow another attempt without remounting
   };
 
   useEffect(() => {
     let active = true;
-    const reader = new BrowserMultiFormatReader(BARCODE_HINTS);
+    const reader = new BrowserMultiFormatReader(BARCODE_HINTS, SCAN_OPTIONS);
     (async () => {
       try {
         const controls = await reader.decodeFromConstraints(
-          { video: { facingMode: "environment" } },
+          SCAN_CONSTRAINTS,
           videoRef.current!,
           (result) => {
             if (!active || handledRef.current || !result) return;
@@ -799,7 +821,7 @@ function ScannerModal({ resolve, onResolved, onClose }: {
   const camLive = phase === "scanning" || phase === "looking" || phase === "notfound";
   const status =
     phase === "looking" ? "Looking up…" :
-    phase === "notfound" ? "No match — try again or type it below." :
+    phase === "notfound" ? note :
     phase === "error" ? "Camera unavailable. Type the barcode digits below." :
     "Point at the barcode on the box.";
 
