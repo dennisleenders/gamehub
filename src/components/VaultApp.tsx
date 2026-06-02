@@ -1,15 +1,17 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search, Plus, X, Gamepad2, Trophy, Heart, Disc, LayoutGrid, Sparkles, Check, Box,
   ChevronLeft, ChevronDown, Pencil, Loader2, ImageIcon, Wand2, Library, Joystick,
   ScanLine, Settings, LogOut, Clock,
 } from "lucide-react";
+import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
+import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { useVault } from "@/lib/useVault";
 import {
   type Game, type Profile, type PlayStatus, PLAY_STATUS, PLATFORM_TINT,
-  DEFAULT_PLATFORMS, DEFAULT_GENRES, CONDITIONS, REGIONS, money,
+  CONDITIONS, REGIONS, money,
 } from "@/lib/types";
 
 const FALLBACK_TINTS = ["#9b8cff", "#6fc7b3", "#e6b667", "#e0738a", "#7fb2ff", "#c98cff"];
@@ -23,13 +25,21 @@ const finishersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status =
 
 export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   const uid = currentUser.id;
-  const { games, profiles, loading, saveGame, deleteGame } = useVault(uid);
+  const { games, profiles, platforms, genres, loading, saveGame, deleteGame, saveSettings } = useVault(uid);
   const userById = (id?: string | null) => profiles.find((p) => p.id === id) || null;
 
   const [view, setView] = useState<"home" | "collection">("home");
   const [detail, setDetail] = useState<Game | null>(null);
   const [editing, setEditing] = useState<Partial<Game> | null>(null);
   const [userMenu, setUserMenu] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
+
+  const resolveUpc = async (upc: string): Promise<{ title: string | null }> => {
+    const r = await fetch("/api/upc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ upc }) });
+    if (!r.ok) return { title: null };
+    return r.json();
+  };
 
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
@@ -50,7 +60,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   const myFinished = owned.filter((g) => getProg(g, uid).status === "finished").length;
   const myBacklog = owned.filter((g) => getProg(g, uid).status === "backlog").length;
 
-  const byPlatform = DEFAULT_PLATFORMS.map((p) => ({ p, count: owned.filter((g) => g.platform === p).length }))
+  const byPlatform = platforms.map((p) => ({ p, count: owned.filter((g) => g.platform === p).length }))
     .filter((x) => x.count).sort((a, b) => b.count - a.count);
   const maxCount = Math.max(1, ...byPlatform.map((x) => x.count));
   const recent = [...games];
@@ -87,8 +97,8 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
 
   const topbar = (floating: boolean) => (
     <TopBar floating={floating} currentUser={currentUser} userMenu={userMenu} setUserMenu={setUserMenu}
-      onScan={() => alert("Barcode scanning lives on mobile/HTTPS — wire to the IGDB+UPC flow.")}
-      onSettings={() => alert("Settings: editable platform/genre lists (port from PoC).")}
+      onScan={() => setScanOpen(true)}
+      onSettings={() => setSettingsOpen(true)}
       onAdd={() => setEditing({})} />
   );
 
@@ -120,7 +130,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
                 <SectionHead icon={Sparkles} accent="var(--accent)">RECENTLY ADDED</SectionHead>
                 <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8, marginTop: 4 }} className="hide-scroll">
                   {recent.slice(0, 8).map((g) => (
-                    <button key={g.id} onClick={() => setDetail(g)} className="shelf-item" style={{ flex: "0 0 auto", width: 122 }}>
+                    <button key={g.id} onClick={() => setDetail(g)} className="shelf-item" style={{ flex: "0 0 auto", width: 122, color: "var(--ink)" }}>
                       <Cover g={g} ratio={1.32} profiles={profiles} />
                       <div style={{ fontSize: 12.5, fontWeight: 700, marginTop: 8, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{g.title}</div>
                       <div style={{ fontSize: 10.5, color: "var(--ink-dim)", fontFamily: "var(--display)", marginTop: 3 }}>{g.platform}</div>
@@ -134,7 +144,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 6 }}>
                   {byPlatform.map((x) => (
                     <button key={x.p} onClick={() => { setPlatform(x.p); setStatus("owned"); setView("collection"); }}
-                      style={{ display: "flex", alignItems: "center", gap: 12, background: "none", border: "none", cursor: "pointer", padding: 0, textAlign: "left" }}>
+                      style={{ display: "flex", alignItems: "center", gap: 12, background: "none", border: "none", cursor: "pointer", padding: 0, textAlign: "left", color: "var(--ink)" }}>
                       <div style={{ width: 44, fontFamily: "var(--display)", fontSize: 12, fontWeight: 700 }}>{x.p}</div>
                       <div style={{ flex: 1, height: 12, background: "var(--panel)", borderRadius: 99, overflow: "hidden", border: "1px solid var(--line)" }}>
                         <div style={{ height: "100%", width: `${(x.count / maxCount) * 100}%`, background: tintFor(x.p) }} />
@@ -170,7 +180,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
               <FilterField label="Library" value={status} onChange={setStatus} options={[["all", "All games"], ["owned", "Owned"], ["wishlist", "Wishlist"]]} />
               <FilterField label="Player" value={playerFilter} onChange={setPlayerFilter} options={[["all", "Any player"], ...profiles.map((a) => [a.id, a.name] as [string, string])]} />
               <FilterField label="Played" value={playFilter} onChange={setPlayFilter} options={[["all", "Any status"], ["playing", "Playing"], ["finished", "Finished"], ["backlog", "Backlog"]]} />
-              <FilterField label="System" value={platform} onChange={setPlatform} options={[["all", "All systems"], ...DEFAULT_PLATFORMS.map((p) => [p, p] as [string, string])]} />
+              <FilterField label="System" value={platform} onChange={setPlatform} options={[["all", "All systems"], ...platforms.map((p) => [p, p] as [string, string])]} />
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "14px 2px 16px", gap: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
@@ -214,10 +224,18 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
 
       {detail && <DetailView game={detail} userById={userById} onClose={() => setDetail(null)} onEdit={() => setEditing(detail)} />}
       {editing !== null && (
-        <GameModal game={editing} currentUser={currentUser}
+        <GameModal game={editing} currentUser={currentUser} platforms={platforms} genres={genres}
           onClose={() => setEditing(null)}
           onSave={async (g) => { await saveGame(g); setEditing(null); }}
           onDelete={async (id) => { await deleteGame(id); setEditing(null); setDetail(null); }} />
+      )}
+      {settingsOpen && (
+        <SettingsModal games={games} platforms={platforms} genres={genres}
+          onSave={saveSettings} onClose={() => setSettingsOpen(false)} />
+      )}
+      {scanOpen && (
+        <ScannerModal resolve={resolveUpc} onClose={() => setScanOpen(false)}
+          onResolved={(title) => { setScanOpen(false); setEditing({ title }); }} />
       )}
     </div>
   );
@@ -519,12 +537,12 @@ function DetailView({ game, userById, onClose, onEdit }: { game: Game; userById:
   );
 }
 
-function GameModal({ game, currentUser, onSave, onDelete, onClose }: { game: Partial<Game>; currentUser: Profile; onSave: (g: any) => void; onDelete: (id: string) => void; onClose: () => void }) {
+function GameModal({ game, currentUser, platforms, genres, onSave, onDelete, onClose }: { game: Partial<Game>; currentUser: Profile; platforms: string[]; genres: string[]; onSave: (g: any) => void; onDelete: (id: string) => void; onClose: () => void }) {
   const isNew = !game.id;
   const myProg = getProg(game as Game, currentUser.id);
   const [f, setF] = useState<any>({
-    title: game.title || "", platform: game.platform || "PS1", status: game.status || "owned",
-    condition: game.condition || "CIB", region: game.region || "PAL", genre: game.genre || "RPG",
+    title: game.title || "", platform: game.platform || platforms[0] || "PS1", status: game.status || "owned",
+    condition: game.condition || "CIB", region: game.region || "PAL", genre: game.genre || genres[0] || "RPG",
     value_eur: game.value_cents ? Math.round(game.value_cents / 100) : "", priority: game.priority || "med",
     notes: game.notes || "", cover: game.cover || "", year: game.year || "",
     developer: game.developer || "", publisher: game.publisher || "", description: game.description || "",
@@ -541,7 +559,7 @@ function GameModal({ game, currentUser, onSave, onDelete, onClose }: { game: Par
     try {
       const r = await fetch("/api/metadata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: f.title.trim() }) });
       const m = await r.json();
-      setF((p: any) => ({ ...p, cover: m.cover || p.cover, description: m.description || p.description, developer: m.developer || p.developer, publisher: m.publisher || p.publisher, year: m.year || p.year, genre: DEFAULT_GENRES.includes(m.genre) ? m.genre : p.genre, rating: m.rating ?? p.rating, hltb: m.hltb || p.hltb, screenshots: m.screenshots?.length ? m.screenshots : p.screenshots, igdb_id: m.igdb_id ?? p.igdb_id }));
+      setF((p: any) => ({ ...p, cover: m.cover || p.cover, description: m.description || p.description, developer: m.developer || p.developer, publisher: m.publisher || p.publisher, year: m.year || p.year, genre: genres.includes(m.genre) ? m.genre : p.genre, rating: m.rating ?? p.rating, hltb: m.hltb || p.hltb, screenshots: m.screenshots?.length ? m.screenshots : p.screenshots, igdb_id: m.igdb_id ?? p.igdb_id }));
       setFetchState("done");
     } catch { setFetchState("empty"); }
   };
@@ -613,10 +631,10 @@ function GameModal({ game, currentUser, onSave, onDelete, onClose }: { game: Par
         )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
-          <Field label="PLATFORM"><Select value={f.platform} opts={DEFAULT_PLATFORMS} onChange={(v: string) => set("platform", v)} /></Field>
+          <Field label="PLATFORM"><Select value={f.platform} opts={platforms} onChange={(v: string) => set("platform", v)} /></Field>
           <Field label="CONDITION"><Select value={f.condition} opts={CONDITIONS} onChange={(v: string) => set("condition", v)} /></Field>
           <Field label="REGION"><Select value={f.region} opts={REGIONS} onChange={(v: string) => set("region", v)} /></Field>
-          <Field label="GENRE"><Select value={f.genre} opts={DEFAULT_GENRES} onChange={(v: string) => set("genre", v)} /></Field>
+          <Field label="GENRE"><Select value={f.genre} opts={genres} onChange={(v: string) => set("genre", v)} /></Field>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 14 }}>
@@ -653,6 +671,177 @@ function GameModal({ game, currentUser, onSave, onDelete, onClose }: { game: Par
           {!isNew && <button onClick={() => onDelete(f.id)} style={{ padding: "13px 16px", border: "1px solid var(--bad)", borderRadius: "var(--radius)", cursor: "pointer", background: "transparent", color: "var(--bad)", fontFamily: "var(--display)", fontWeight: 700 }}>DELETE</button>}
           <button onClick={save} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "13px 0", border: "none", borderRadius: "var(--radius)", cursor: "pointer", background: "var(--accent2)", color: "var(--bg)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 14 }}><Check size={17} strokeWidth={3} /> {isNew ? "ADD TO VAULT" : "SAVE"}</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsModal({ games, platforms, genres, onSave, onClose }: {
+  games: Game[]; platforms: string[]; genres: string[];
+  onSave: (key: "platforms" | "genres", value: string[]) => void; onClose: () => void;
+}) {
+  const lbl: React.CSSProperties = { fontSize: 10, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, marginBottom: 8, display: "block" };
+  const inp: React.CSSProperties = { flex: 1, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", color: "var(--ink)", padding: "10px 12px", fontSize: 14, fontFamily: "var(--body)", outline: "none", boxSizing: "border-box" };
+
+  // One editable list (platforms or genres), persisted on every change. Items
+  // still attached to games can't be removed — that would orphan the value in
+  // the dropdowns and stats.
+  const EditableList = ({ title, icon: Ic, items, field, usedCount }: {
+    title: string; icon: any; items: string[]; field: "platforms" | "genres"; usedCount: (v: string) => number;
+  }) => {
+    const [draft, setDraft] = useState("");
+    const add = () => {
+      const v = draft.trim();
+      if (!v || items.some((i) => i.toLowerCase() === v.toLowerCase())) { setDraft(""); return; }
+      onSave(field, [...items, v]);
+      setDraft("");
+    };
+    const remove = (v: string) => onSave(field, items.filter((i) => i !== v));
+    return (
+      <div style={{ marginBottom: 22 }}>
+        <label style={lbl}><Ic size={12} style={{ verticalAlign: "-2px", marginRight: 6 }} />{title}</label>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+          {items.map((v) => {
+            const n = usedCount(v);
+            return (
+              <span key={v} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 6px 6px 11px", borderRadius: 99, border: "1px solid var(--line)", background: "var(--bg)", fontSize: 12.5, fontFamily: "var(--display)", fontWeight: 700 }}>
+                {v}
+                {n > 0 && <span style={{ fontSize: 10, color: "var(--ink-dim)" }}>{n}</span>}
+                <button onClick={() => remove(v)} disabled={n > 0} title={n > 0 ? `In use by ${n} game${n === 1 ? "" : "s"}` : "Remove"}
+                  style={{ display: "grid", placeItems: "center", width: 19, height: 19, borderRadius: 99, border: "none", cursor: n > 0 ? "not-allowed" : "pointer", background: n > 0 ? "transparent" : "var(--panel-alt)", color: n > 0 ? "var(--ink-dim)" : "var(--ink)", opacity: n > 0 ? 0.4 : 1 }}>
+                  <X size={12} />
+                </button>
+              </span>
+            );
+          })}
+          {!items.length && <span style={{ fontSize: 12, color: "var(--ink-dim)" }}>Nothing yet — add one below.</span>}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input style={inp} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} placeholder={`Add ${title.toLowerCase().replace(/s$/, "")}…`} />
+          <button onClick={add} disabled={!draft.trim()} style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "0 14px", border: "none", borderRadius: "var(--radius)", cursor: draft.trim() ? "pointer" : "not-allowed", background: "var(--accent2)", color: "var(--bg)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 12, opacity: draft.trim() ? 1 : 0.5 }}>
+            <Plus size={15} strokeWidth={3} /> ADD
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} className="fade">
+      <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "94vh", overflowY: "auto", overflowX: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <div style={{ fontFamily: "var(--display)", fontSize: 16, color: "var(--accent)" }}>SETTINGS</div>
+          <button onClick={onClose} style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", cursor: "pointer", color: "var(--ink)", padding: 7 }}><X size={16} /></button>
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--ink-dim)", lineHeight: 1.5, marginBottom: 20 }}>
+          Curate the dropdown lists shared across your household. Changes save instantly.
+        </div>
+        <EditableList title="Platforms" icon={Gamepad2} items={platforms} field="platforms" usedCount={(v) => games.filter((g) => g.platform === v).length} />
+        <EditableList title="Genres" icon={Library} items={genres} field="genres" usedCount={(v) => games.filter((g) => g.genre === v).length} />
+      </div>
+    </div>
+  );
+}
+
+// Restrict to the 1-D retail barcode symbologies a game case actually carries —
+// fewer formats means faster, more reliable decoding off a shaky phone camera.
+const BARCODE_HINTS = new Map([
+  [DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.EAN_13, BarcodeFormat.EAN_8]],
+]);
+
+function ScannerModal({ resolve, onResolved, onClose }: {
+  resolve: (upc: string) => Promise<{ title: string | null }>;
+  onResolved: (title: string) => void;
+  onClose: () => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const controlsRef = useRef<IScannerControls | null>(null);
+  const handledRef = useRef(false);
+  const [phase, setPhase] = useState<"scanning" | "looking" | "notfound" | "error">("scanning");
+  const [manual, setManual] = useState("");
+
+  const lookup = async (raw: string) => {
+    const code = raw.replace(/\D/g, "");
+    if (code.length < 6) { handledRef.current = false; return; }
+    handledRef.current = true;
+    setPhase("looking");
+    try {
+      const r = await resolve(code);
+      if (r?.title) { onResolved(r.title); return; }
+    } catch { /* fall through to not-found */ }
+    setPhase("notfound");
+    handledRef.current = false; // allow another attempt without remounting
+  };
+
+  useEffect(() => {
+    let active = true;
+    const reader = new BrowserMultiFormatReader(BARCODE_HINTS);
+    (async () => {
+      try {
+        const controls = await reader.decodeFromConstraints(
+          { video: { facingMode: "environment" } },
+          videoRef.current!,
+          (result) => {
+            if (!active || handledRef.current || !result) return;
+            lookup(result.getText());
+          }
+        );
+        if (active) controlsRef.current = controls;
+        else controls.stop();
+      } catch {
+        if (active) setPhase("error");
+      }
+    })();
+    return () => { active = false; controlsRef.current?.stop(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const camLive = phase === "scanning" || phase === "looking" || phase === "notfound";
+  const status =
+    phase === "looking" ? "Looking up…" :
+    phase === "notfound" ? "No match — try again or type it below." :
+    phase === "error" ? "Camera unavailable. Type the barcode digits below." :
+    "Point at the barcode on the box.";
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000d", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 80 }} className="fade">
+      <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <div style={{ fontFamily: "var(--display)", fontSize: 16, color: "var(--accent)" }}>SCAN BARCODE</div>
+          <button onClick={onClose} style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", cursor: "pointer", color: "var(--ink)", padding: 7 }}><X size={16} /></button>
+        </div>
+
+        <div style={{ position: "relative", width: "100%", aspectRatio: "4 / 3", borderRadius: "var(--radius)", overflow: "hidden", background: "#000", border: "1px solid var(--line)", marginBottom: 12 }}>
+          <video ref={videoRef} playsInline muted style={{ width: "100%", height: "100%", objectFit: "cover", display: camLive ? "block" : "none" }} />
+          {camLive && (
+            <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}>
+              <div style={{ width: "78%", height: 92, border: "2px solid var(--accent2)", borderRadius: 10, boxShadow: "0 0 0 100vmax #0006" }} />
+            </div>
+          )}
+          {phase === "looking" && (
+            <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", background: "#0008" }}>
+              <Loader2 size={28} className="spin" color="#fff" />
+            </div>
+          )}
+          {phase === "error" && (
+            <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--ink-dim)" }}>
+              <ScanLine size={34} style={{ opacity: 0.5 }} />
+            </div>
+          )}
+        </div>
+
+        <div style={{ fontSize: 12.5, color: phase === "notfound" ? "var(--bad)" : "var(--ink-dim)", fontFamily: "var(--display)", lineHeight: 1.4, marginBottom: 14, textAlign: "center" }}>
+          {status}
+        </div>
+
+        <form onSubmit={(e) => { e.preventDefault(); lookup(manual); }} style={{ display: "flex", gap: 8 }}>
+          <input value={manual} onChange={(e) => setManual(e.target.value)} inputMode="numeric" placeholder="Enter barcode digits"
+            style={{ flex: 1, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", color: "var(--ink)", padding: "11px 12px", fontSize: 14, fontFamily: "var(--body)", outline: "none", boxSizing: "border-box" }} />
+          <button type="submit" disabled={manual.replace(/\D/g, "").length < 6 || phase === "looking"}
+            style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "0 16px", border: "none", borderRadius: "var(--radius)", cursor: "pointer", background: "var(--accent2)", color: "var(--bg)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 12, opacity: manual.replace(/\D/g, "").length < 6 || phase === "looking" ? 0.5 : 1 }}>
+            <Check size={15} strokeWidth={3} /> LOOK UP
+          </button>
+        </form>
       </div>
     </div>
   );

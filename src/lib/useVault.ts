@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { DEFAULT_PLATFORMS, DEFAULT_GENRES } from "@/lib/types";
 import type { Game, Profile, PlayStatus } from "@/lib/types";
 
 // Central data layer. Replaces the PoC's in-memory state + window.storage with
@@ -11,13 +12,16 @@ export function useVault(currentUserId: string) {
   const supabase = createClient();
   const [games, setGames] = useState<Game[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [platforms, setPlatforms] = useState<string[]>(DEFAULT_PLATFORMS);
+  const [genres, setGenres] = useState<string[]>(DEFAULT_GENRES);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const [{ data: gs }, { data: prog }, { data: profs }] = await Promise.all([
+    const [{ data: gs }, { data: prog }, { data: profs }, { data: settings }] = await Promise.all([
       supabase.from("games").select("*").order("created_at", { ascending: false }),
       supabase.from("progress").select("*"),
       supabase.from("profiles").select("*"),
+      supabase.from("app_settings").select("*"),
     ]);
     const byGame: Record<string, Game["progress"]> = {};
     (prog ?? []).forEach((p: any) => {
@@ -25,6 +29,12 @@ export function useVault(currentUserId: string) {
     });
     setGames((gs ?? []).map((g: any) => ({ ...g, progress: byGame[g.id] ?? {} })));
     setProfiles(profs ?? []);
+    // Settings are a small key/value store; fall back to the bundled defaults
+    // if the table is empty or hasn't been migrated yet.
+    const byKey: Record<string, any> = {};
+    (settings ?? []).forEach((s: any) => { byKey[s.key] = s.value; });
+    setPlatforms(Array.isArray(byKey.platforms) && byKey.platforms.length ? byKey.platforms : DEFAULT_PLATFORMS);
+    setGenres(Array.isArray(byKey.genres) && byKey.genres.length ? byKey.genres : DEFAULT_GENRES);
     setLoading(false);
   }, [supabase]);
 
@@ -37,6 +47,7 @@ export function useVault(currentUserId: string) {
       .channel("vault")
       .on("postgres_changes", { event: "*", schema: "public", table: "games" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "progress" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_settings" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [supabase, load]);
@@ -69,5 +80,11 @@ export function useVault(currentUserId: string) {
     await load();
   }, [supabase, load]);
 
-  return { games, profiles, loading, saveGame, deleteGame, reload: load };
+  // Persist an editable list (platforms/genres) to the shared settings store.
+  const saveSettings = useCallback(async (key: "platforms" | "genres", value: string[]) => {
+    await supabase.from("app_settings").upsert({ key, value });
+    await load();
+  }, [supabase, load]);
+
+  return { games, profiles, platforms, genres, loading, saveGame, deleteGame, saveSettings, reload: load };
 }

@@ -101,7 +101,8 @@ The Edge Functions are deployed to Supabase (step 1), not Vercel — Vercel only
 ## Notes & next steps
 
 - **Sessions never expire** for practical purposes: the middleware refreshes the token on every request, so a logged-in device stays logged in. To force logout, use the account menu.
-- **Barcode scanning** and the **Settings** (editable platform/genre lists) are stubbed in `VaultApp.tsx` with `alert()` placeholders — the PoC versions can be ported in; barcode needs HTTPS + a mobile camera (works on the Vercel domain).
-- **Realtime:** `useVault` subscribes to `games` and `progress` changes, so when your partner adds a game or updates progress on their phone, your view updates live.
+- **Settings** (editable platform/genre lists) live in the `app_settings` table and are managed from the in-app gear menu — shared across the household and editable by any member.
+- **Barcode scanning** uses `@zxing/browser` (camera) → `/api/upc` → UPCitemdb's free trial endpoint to resolve a UPC/EAN to a product name, which prefills the Add form (tap **FILL** to pull full metadata from IGDB). No API key required — UPCitemdb's trial allows ~100 lookups/day. Needs HTTPS + a camera (works on the Vercel domain); a manual digit-entry fallback covers devices/browsers without camera access. We use UPCitemdb purely as a barcode→name dictionary because IGDB has no barcode field.
+- **Realtime:** `useVault` subscribes to `games`, `progress`, and `app_settings` changes, so when your partner adds a game, updates progress, or edits the lists on their phone, your view updates live.
 - **Currency** is stored as integer cents (`value_cents`) and displayed in €. Swap the `money()` helper in `lib/types.ts` to change formatting.
 - **Tighten before going fully public:** the `next.config.ts` image `remotePatterns` is permissive (`**`); narrow it to the hosts you actually use.
