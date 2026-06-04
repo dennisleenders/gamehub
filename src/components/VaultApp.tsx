@@ -116,7 +116,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
           <div style={{ position: "relative", maxWidth: 940, margin: "0 auto", padding: "24px 16px 110px" }}>
             <div className="fade home-col" style={{ display: "flex", flexDirection: "column", gap: 26 }}>
               <section>
-                <div style={{ fontSize: 11, letterSpacing: 2, color: "var(--ink-dim)", fontFamily: "var(--display)", marginBottom: 8 }}>YOUR COLLECTION</div>
+                <div style={{ fontSize: 11, letterSpacing: 2, color: "var(--ink-dim)", fontFamily: "var(--display)", marginBottom: 14 }}>YOUR COLLECTION</div>
                 <div style={{ display: "flex", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
                   <div style={{ fontFamily: "var(--display)", fontSize: 64, lineHeight: .9 }}>{owned.length}</div>
                   <div style={{ fontSize: 15, color: "var(--ink-dim)", paddingBottom: 6 }}>games owned</div>
@@ -133,11 +133,11 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
 
               <section>
                 <SectionHead icon={Sparkles} accent="var(--accent)">RECENTLY ADDED</SectionHead>
-                <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8, marginTop: 4 }} className="hide-scroll">
+                <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }} className="hide-scroll">
                   {recent.slice(0, 8).map((g) => (
                     <button key={g.id} onClick={() => setDetail(g)} className="shelf-item" style={{ flex: "0 0 auto", width: 122, color: "var(--ink)" }}>
                       <Cover g={g} ratio={1.32} profiles={profiles} />
-                      <div style={{ fontSize: 12.5, fontWeight: 700, marginTop: 8, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{g.title}</div>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, marginTop: 8, lineHeight: 1.2, height: "2.4em", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{g.title}</div>
                       <div style={{ fontSize: 10.5, color: "var(--ink-dim)", fontFamily: "var(--display)", marginTop: 3 }}>{g.platform}</div>
                     </button>
                   ))}
@@ -146,7 +146,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
 
               <section>
                 <SectionHead icon={Gamepad2} accent="var(--accent2)">BY SYSTEM</SectionHead>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 6 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {byPlatform.map((x) => (
                     <button key={x.p} onClick={() => { setPlatform(x.p); setStatus("owned"); setView("collection"); }}
                       style={{ display: "flex", alignItems: "center", gap: 12, background: "none", border: "none", cursor: "pointer", padding: 0, textAlign: "left", color: "var(--ink)" }}>
@@ -264,7 +264,7 @@ function MiniStat({ icon: Icon, label, value, color, onClick }: any) {
 }
 function SectionHead({ icon: Icon, accent, children }: any) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
       <Icon size={15} color={accent} />
       <span style={{ fontSize: 12, letterSpacing: 1.5, fontFamily: "var(--display)", fontWeight: 700 }}>{children}</span>
     </div>
@@ -288,7 +288,7 @@ function Cover({ g, ratio = 1.32, profiles }: { g: Game; ratio?: number; profile
     <div style={{ width: "100%", aspectRatio: `1 / ${ratio}`, borderRadius: "var(--radius)", position: "relative", overflow: "hidden", border: "1px solid var(--line)", background: `linear-gradient(150deg, ${tint}33, var(--panel-alt))` }}>
       {showArt ? <img src={g.cover!} alt={g.title} onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         : <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}><span style={{ fontFamily: "var(--display)", fontSize: 30, color: tint, opacity: .5 }}>{(g.title || "?")[0]}</span></div>}
-      {g.status === "wishlist" && <div style={{ position: "absolute", top: 7, right: 7, background: "#13111ad0", borderRadius: 99, padding: 4 }}><Heart size={12} color="var(--accent)" fill="var(--accent)" /></div>}
+      {g.status === "wishlist" && <div style={{ position: "absolute", top: 7, right: 7, display: "grid", placeItems: "center", width: 22, height: 22, borderRadius: 99, background: "#13111ad0" }}><Heart size={12} color="var(--accent)" fill="var(--accent)" /></div>}
       {g.status === "owned" && (players.length > 0 || finishers.length > 0) && (
         <div style={{ position: "absolute", top: 7, right: 7, display: "flex", gap: 4 }}>
           {players.map((u) => <span key={"p" + u.id} title={`${u.name} playing`} style={{ display: "grid", placeItems: "center", width: 19, height: 19, borderRadius: 99, background: "#13111aea", border: `1.5px solid ${u.color}` }}><span className="pulse" style={{ width: 7, height: 7, borderRadius: 99, background: u.color }} /></span>)}
@@ -305,7 +305,7 @@ function GameCard({ g, profiles, onClick }: { g: Game; profiles: Profile[]; onCl
     <button onClick={onClick} className="game-card" style={{ display: "flex", flexDirection: "column", gap: 9, color: "var(--ink)" }}>
       <Cover g={g} ratio={1.32} profiles={profiles} />
       <div>
-        <div style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{g.title}</div>
+        <div style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.2, height: "2.4em", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{g.title}</div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 5 }}>
           <span style={{ fontSize: 10, fontFamily: "var(--display)", fontWeight: 700, padding: "2px 7px", borderRadius: "var(--radius)", border: `1px solid ${tint}`, color: tint, background: tint + "1a" }}>{g.platform}</span>
           <span style={{ fontSize: 11, fontFamily: "var(--display)", color: g.status === "owned" ? "var(--ink-dim)" : "var(--accent)" }}>{g.status === "owned" ? money(g.value_cents) : "♡ wishlist"}</span>
@@ -628,7 +628,7 @@ function GameModal({ game, currentUser, platforms, genres, onSave, onDelete, onC
       <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "94vh", overflowY: "auto", overflowX: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
           <div style={{ fontFamily: "var(--display)", fontSize: 16, color: "var(--accent)" }}>{isNew ? "NEW ENTRY" : "EDIT"}</div>
-          <button onClick={onClose} style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", cursor: "pointer", color: "var(--ink)", padding: 7 }}><X size={16} /></button>
+          <button onClick={onClose} style={{ display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><X size={16} /></button>
         </div>
 
         <div style={{ marginBottom: 14 }}>
@@ -779,7 +779,7 @@ function SettingsModal({ games, platforms, genres, onSave, onClose }: {
       <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "94vh", overflowY: "auto", overflowX: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
           <div style={{ fontFamily: "var(--display)", fontSize: 16, color: "var(--accent)" }}>SETTINGS</div>
-          <button onClick={onClose} style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", cursor: "pointer", color: "var(--ink)", padding: 7 }}><X size={16} /></button>
+          <button onClick={onClose} style={{ display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><X size={16} /></button>
         </div>
         <div style={{ fontSize: 12.5, color: "var(--ink-dim)", lineHeight: 1.5, marginBottom: 20 }}>
           Curate the dropdown lists shared across your household. Changes save instantly.
@@ -918,7 +918,7 @@ function ScannerModal({ resolve, onResolved, onClose }: {
       <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ fontFamily: "var(--display)", fontSize: 16, color: "var(--accent)" }}>SCAN BARCODE</div>
-          <button onClick={onClose} style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", cursor: "pointer", color: "var(--ink)", padding: 7 }}><X size={16} /></button>
+          <button onClick={onClose} style={{ display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><X size={16} /></button>
         </div>
 
         <div style={{ position: "relative", width: "100%", aspectRatio: "4 / 3", borderRadius: "var(--radius)", overflow: "hidden", background: "#000", border: "1px solid var(--line)", marginBottom: 12 }}>
