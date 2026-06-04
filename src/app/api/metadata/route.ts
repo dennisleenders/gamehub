@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { priceByUpc, priceByQuery, toEurPrice, usdToEurRate, readPriceConfig } from "@/lib/pricecharting";
 
-// Server-side aggregator: takes a title, fans out to the IGDB + HLTB (+ optional
-// PriceCharting) Edge Functions, and returns a single merged metadata object for
-// the add/edit form. Runs server-side so the browser never holds any tokens.
+// Server-side aggregator: takes a title (and optionally the scanned UPC), fans out
+// to the IGDB + HLTB Edge Functions and PriceCharting, and returns a single merged
+// metadata object for the add/edit form. Runs server-side so the browser never
+// holds any tokens.
 export async function POST(req: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const { title, withPrice } = await req.json();
+  const { title, upc, withPrice } = await req.json();
   if (!title) return NextResponse.json({ error: "title required" }, { status: 400 });
 
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -27,11 +29,31 @@ export async function POST(req: Request) {
     }
   };
 
-  const [igdb, hltb, price] = await Promise.all([
+  // Pricing only runs when the client asks for it AND the feature is on with a
+  // token set (read server-side, authoritative). When a scanned UPC is present we
+  // match the exact edition; otherwise we fall back to a title-text search.
+  const cfg = withPrice ? await readPriceConfig(supabase) : { enabled: false, token: "" };
+  const doPrice = withPrice && cfg.enabled && !!cfg.token;
+  const priceLookup = async () => {
+    if (!doPrice) return null;
+    const code = String(upc ?? "").replace(/\D/g, "");
+    let m = code ? await priceByUpc(cfg.token, code) : null;
+    if (!m) m = await priceByQuery(cfg.token, title);
+    return m;
+  };
+
+  // Fetch the FX rate alongside the lookups (only when pricing) so it adds no
+  // latency to the FILL.
+  const [igdb, hltb, pcMatch, rate] = await Promise.all([
     call("igdb-proxy", { title }),
     call("hltb-proxy", { title }),
-    withPrice ? call("pricecharting-proxy", { q: title }) : Promise.resolve(null),
+    priceLookup(),
+    doPrice ? usdToEurRate() : Promise.resolve(0),
   ]);
+
+  // EUR-cent tiers; the form picks the tier matching the game's condition and
+  // re-derives client-side when condition changes (no extra lookup).
+  const priceOut = pcMatch ? toEurPrice(pcMatch, rate) : null;
 
   const m = igdb?.match ?? {};
   return NextResponse.json({
@@ -46,6 +68,6 @@ export async function POST(req: Request) {
     screenshots: m.screenshots ?? [],
     igdb_id: m.igdbId ?? null,
     hltb: hltb?.match?.hltb ?? null,
-    price: price?.match ?? null,
+    price: priceOut,
   });
 }

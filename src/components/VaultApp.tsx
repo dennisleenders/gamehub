@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search, Plus, X, Gamepad2, Trophy, Heart, Disc, LayoutGrid, Sparkles, Check, Box, CircleUser,
   ChevronLeft, ChevronDown, Pencil, Loader2, ImageIcon, Wand2, Library, Joystick,
-  ScanLine, Settings, LogOut, Clock,
+  ScanLine, Settings, LogOut, Clock, Tag,
 } from "lucide-react";
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
@@ -19,13 +19,30 @@ const hashIdx = (s = "", n = 1) => { let h = 0; for (let i = 0; i < s.length; i+
 const tintFor = (p: string) => PLATFORM_TINT[p] || FALLBACK_TINTS[hashIdx(p, FALLBACK_TINTS.length)];
 const playColor = (k: string) => k === "playing" ? "var(--accent2)" : k === "finished" ? "var(--good)" : "var(--ink-dim)";
 const getProg = (g: Game, uid?: string) => (uid && g.progress?.[uid]) || { status: "backlog" as PlayStatus, hours: 0 };
+
+// PriceCharting returns loose/CIB/new prices; pick the tier matching the game's
+// condition (Sealed→new, CIB→cib, Loose→loose). Falls back across tiers if the
+// preferred one is missing so we still surface a number. Cents in, cents out.
+type PriceTiers = { loose: number | null; cib: number | null; new: number | null };
+const tierForCondition = (t: PriceTiers, condition: string): number | null => {
+  const preferred = condition === "Sealed" ? t.new : condition === "Loose" ? t.loose : t.cib;
+  return preferred ?? t.cib ?? t.loose ?? t.new ?? null;
+};
+
+// EUR-cent price payload returned by /api/upc and /api/metadata.
+type PricePayload = { pricecharting_id: string | null; name: string; loose_cents: number | null; cib_cents: number | null; new_cents: number | null };
+// What the scanner hands back: the resolved title plus, when PriceCharting named
+// it, the scanned barcode and its price/id so the form opens pre-priced.
+type ScanResult = { title: string; upc?: string; price?: PricePayload | null; pricecharting_id?: string | null };
+// Seed passed into GameModal — a Game plus scan-only extras the Game table doesn't store.
+type GameSeed = Partial<Game> & { upc?: string | null; priceTiers?: PriceTiers | null };
 const progressEntries = (g: Game) => Object.entries(g.progress || {});
 const playersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status === "playing");
 const finishersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status === "finished");
 
 export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   const uid = currentUser.id;
-  const { games, profiles, platforms, genres, loading, saveGame, deleteGame, saveSettings, savePreferences } = useVault(uid);
+  const { games, profiles, platforms, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveSettings, savePreferences } = useVault(uid);
   const userById = (id?: string | null) => profiles.find((p) => p.id === id) || null;
 
   // Live current profile (reflects reloads after saving prefs); falls back to the
@@ -35,12 +52,12 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
 
   const [view, setView] = useState<"home" | "collection">("home");
   const [detail, setDetail] = useState<Game | null>(null);
-  const [editing, setEditing] = useState<Partial<Game> | null>(null);
+  const [editing, setEditing] = useState<GameSeed | null>(null);
   const [userMenu, setUserMenu] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
 
-  const resolveUpc = async (upc: string): Promise<{ title: string | null; error?: string }> => {
+  const resolveUpc = async (upc: string): Promise<{ title: string | null; error?: string; price?: PricePayload | null; pricecharting_id?: string | null }> => {
     const r = await fetch("/api/upc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ upc }) });
     if (!r.ok) return { title: null, error: "network" };
     return r.json();
@@ -282,18 +299,24 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
 
       {liveDetail && <DetailView game={liveDetail} userById={userById} onClose={() => setDetail(null)} onEdit={() => setEditing(liveDetail)} />}
       {editing !== null && (
-        <GameModal game={editing} currentUser={currentUser} platforms={platforms} genres={genres}
+        <GameModal game={editing} currentUser={currentUser} platforms={platforms} genres={genres} priceEnabled={priceChartingEnabled}
           onClose={() => setEditing(null)}
           onSave={async (g) => { await saveGame(g); setEditing(null); }}
           onDelete={async (id) => { await deleteGame(id); setEditing(null); setDetail(null); }} />
       )}
       {settingsOpen && (
-        <SettingsModal games={games} platforms={platforms} preferences={me.preferences}
+        <SettingsModal games={games} platforms={platforms} preferences={me.preferences} priceEnabled={priceChartingEnabled} priceTokenSet={priceChartingTokenSet}
           onSave={saveSettings} onSavePreferences={savePreferences} onClose={() => setSettingsOpen(false)} />
       )}
       {scanOpen && (
         <ScannerModal resolve={resolveUpc} onClose={() => setScanOpen(false)}
-          onResolved={(title) => { setScanOpen(false); setEditing({ title }); }} />
+          onResolved={(res) => {
+            setScanOpen(false);
+            // If PriceCharting named it, seed the form with its price + id so it
+            // opens pre-priced (no second PriceCharting call needed at FILL).
+            const tiers = res.price ? { loose: res.price.loose_cents, cib: res.price.cib_cents, new: res.price.new_cents } : null;
+            setEditing({ title: res.title, upc: res.upc ?? null, pricecharting_id: res.pricecharting_id ?? null, priceTiers: tiers });
+          }} />
       )}
     </div>
   );
@@ -621,20 +644,31 @@ function DetailView({ game, userById, onClose, onEdit }: { game: Game; userById:
   );
 }
 
-function GameModal({ game, currentUser, platforms, genres, onSave, onDelete, onClose }: { game: Partial<Game>; currentUser: Profile; platforms: string[]; genres: string[]; onSave: (g: any) => void; onDelete: (id: string) => void; onClose: () => void }) {
+function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave, onDelete, onClose }: { game: GameSeed; currentUser: Profile; platforms: string[]; genres: string[]; priceEnabled: boolean; onSave: (g: any) => void; onDelete: (id: string) => void; onClose: () => void }) {
   const isNew = !game.id;
   const myProg = getProg(game as Game, currentUser.id);
+  // A scan can seed price tiers; derive the initial value from the tier matching
+  // the starting condition, otherwise from any existing value_cents.
+  const seedCondition = game.condition || "CIB";
+  const seedValueEur = game.priceTiers
+    ? Math.round((tierForCondition(game.priceTiers, seedCondition) ?? 0) / 100) || ""
+    : game.value_cents ? Math.round(game.value_cents / 100) : "";
   const [f, setF] = useState<any>({
     title: game.title || "", platform: game.platform || platforms[0] || "PS1", status: game.status || "owned",
-    condition: game.condition || "CIB", region: game.region || "PAL", genre: game.genre || genres[0] || "RPG",
-    value_eur: game.value_cents ? Math.round(game.value_cents / 100) : "", priority: game.priority || "med",
+    condition: seedCondition, region: game.region || "PAL", genre: game.genre || genres[0] || "RPG",
+    value_eur: seedValueEur, priority: game.priority || "med",
     notes: game.notes || "", cover: game.cover || "", year: game.year || "",
     developer: game.developer || "", publisher: game.publisher || "", description: game.description || "",
     rating: game.rating ?? null, screenshots: game.screenshots || [], hltb: game.hltb || null,
-    igdb_id: game.igdb_id ?? null, id: game.id,
+    igdb_id: game.igdb_id ?? null, pricecharting_id: game.pricecharting_id ?? null, upc: game.upc ?? null, id: game.id,
     myStatus: myProg.status, myHours: myProg.hours ?? "",
   });
   const [fetchState, setFetchState] = useState<"idle" | "loading" | "done" | "empty">("idle");
+  // EUR-cent tiers from the scan or the last FILL + the matched product name. Held
+  // so a later condition change re-prices without another API call, and so we can
+  // show what PriceCharting matched. Seeded from a scan when present.
+  const [priceTiers, setPriceTiers] = useState<PriceTiers | null>(game.priceTiers ?? null);
+  const [pricedName, setPricedName] = useState<string>(game.priceTiers ? (game.title || "") : "");
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
 
   // Replay handling: completions so far, and whether this edit starts a new run.
@@ -652,9 +686,29 @@ function GameModal({ game, currentUser, platforms, genres, onSave, onDelete, onC
     if (!f.title.trim()) return;
     setFetchState("loading");
     try {
-      const r = await fetch("/api/metadata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: f.title.trim() }) });
+      // Only ask for a price if we don't already have one (a scan may have priced
+      // it). When we do ask, pass the scanned UPC so PriceCharting matches the
+      // exact edition rather than guessing from the title.
+      const wantPrice = priceEnabled && !priceTiers;
+      const r = await fetch("/api/metadata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: f.title.trim(), upc: f.upc || undefined, withPrice: wantPrice }) });
       const m = await r.json();
-      setF((p: any) => ({ ...p, cover: m.cover || p.cover, description: m.description || p.description, developer: m.developer || p.developer, publisher: m.publisher || p.publisher, year: m.year || p.year, genre: genres.includes(m.genre) ? m.genre : p.genre, rating: m.rating ?? p.rating, hltb: m.hltb || p.hltb, screenshots: m.screenshots?.length ? m.screenshots : p.screenshots, igdb_id: m.igdb_id ?? p.igdb_id }));
+      // Price (in EUR cents) only comes back when we asked and a product matched.
+      // When present, fill the value from the tier matching the current condition
+      // and keep the tiers for re-pricing. When absent we leave any existing price
+      // untouched — a scan may have already priced this game.
+      const tiers: PriceTiers | null = m.price
+        ? { loose: m.price.loose_cents ?? null, cib: m.price.cib_cents ?? null, new: m.price.new_cents ?? null }
+        : null;
+      if (tiers) { setPriceTiers(tiers); setPricedName(m.price?.name || ""); }
+      setF((p: any) => {
+        const next = { ...p, cover: m.cover || p.cover, description: m.description || p.description, developer: m.developer || p.developer, publisher: m.publisher || p.publisher, year: m.year || p.year, genre: genres.includes(m.genre) ? m.genre : p.genre, rating: m.rating ?? p.rating, hltb: m.hltb || p.hltb, screenshots: m.screenshots?.length ? m.screenshots : p.screenshots, igdb_id: m.igdb_id ?? p.igdb_id };
+        if (tiers) {
+          next.pricecharting_id = m.price.pricecharting_id ?? p.pricecharting_id;
+          const cents = tierForCondition(tiers, p.condition);
+          if (cents != null) next.value_eur = Math.round(cents / 100);
+        }
+        return next;
+      });
       setFetchState("done");
     } catch { setFetchState("empty"); }
   };
@@ -666,7 +720,7 @@ function GameModal({ game, currentUser, platforms, genres, onSave, onDelete, onC
       region: f.region, genre: f.genre, year: Number(f.year) || null, developer: f.developer,
       publisher: f.publisher, rating: f.rating == null ? null : Number(f.rating),
       value_cents: (Number(f.value_eur) || 0) * 100, cover: f.cover, description: f.description,
-      screenshots: f.screenshots, hltb: f.hltb, priority: f.priority, notes: f.notes, igdb_id: f.igdb_id,
+      screenshots: f.screenshots, hltb: f.hltb, priority: f.priority, notes: f.notes, igdb_id: f.igdb_id, pricecharting_id: f.pricecharting_id ?? null,
       myStatus: f.status === "owned" ? f.myStatus : undefined, myHours: Number(f.myHours) || 0,
     });
   };
@@ -700,7 +754,7 @@ function GameModal({ game, currentUser, platforms, genres, onSave, onDelete, onC
             <label style={lbl}>BOX ART</label>
             <input style={inp} value={f.cover} onChange={(e) => set("cover", e.target.value)} placeholder="Image URL (or tap FILL)" />
             <span style={{ fontSize: 10, color: fetchState === "empty" ? "var(--bad)" : "var(--ink-dim)", fontFamily: "var(--display)", lineHeight: 1.4 }}>
-              {fetchState === "loading" && "Looking up via IGDB + HLTB…"}{fetchState === "done" && "✓ Details filled."}{fetchState === "empty" && "No match. Fill manually."}{fetchState === "idle" && "Tap FILL to auto-fetch."}
+              {fetchState === "loading" && `Looking up via IGDB + HLTB${priceEnabled ? " + PriceCharting" : ""}…`}{fetchState === "done" && (pricedName ? `✓ Details filled · priced from “${pricedName}”` : "✓ Details filled.")}{fetchState === "empty" && "No match. Fill manually."}{fetchState === "idle" && "Tap FILL to auto-fetch."}
             </span>
           </div>
         </div>
@@ -733,7 +787,11 @@ function GameModal({ game, currentUser, platforms, genres, onSave, onDelete, onC
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
           <Field label="PLATFORM"><Select value={f.platform} opts={platforms} onChange={(v: string) => set("platform", v)} /></Field>
-          <Field label="CONDITION"><Select value={f.condition} opts={CONDITIONS} onChange={(v: string) => set("condition", v)} /></Field>
+          <Field label="CONDITION"><Select value={f.condition} opts={CONDITIONS} onChange={(v: string) => {
+            set("condition", v);
+            // If FILL fetched prices, re-derive the value for the new condition.
+            if (priceTiers) { const cents = tierForCondition(priceTiers, v); if (cents != null) set("value_eur", Math.round(cents / 100)); }
+          }} /></Field>
           <Field label="REGION"><Select value={f.region} opts={REGIONS} onChange={(v: string) => set("region", v)} /></Field>
           <Field label="GENRE"><Select value={f.genre} opts={genres} onChange={(v: string) => set("genre", v)} /></Field>
         </div>
@@ -777,12 +835,15 @@ function GameModal({ game, currentUser, platforms, genres, onSave, onDelete, onC
   );
 }
 
-function SettingsModal({ games, platforms, preferences, onSave, onSavePreferences, onClose }: {
-  games: Game[]; platforms: string[]; preferences: Profile["preferences"];
-  onSave: (key: "platforms", value: string[]) => void;
+function SettingsModal({ games, platforms, preferences, priceEnabled, priceTokenSet, onSave, onSavePreferences, onClose }: {
+  games: Game[]; platforms: string[]; preferences: Profile["preferences"]; priceEnabled: boolean; priceTokenSet: boolean;
+  onSave: (key: "platforms" | "pricecharting_enabled" | "pricecharting_token", value: string[] | boolean | string) => void;
   onSavePreferences: (preferences: Profile["preferences"]) => void;
   onClose: () => void;
 }) {
+  // Write-only token field: we never receive the saved token, only whether one
+  // exists, so the input starts empty and "paste to replace" rather than showing it.
+  const [tokenDraft, setTokenDraft] = useState("");
   const lbl: React.CSSProperties = { fontSize: 10, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, marginBottom: 8, display: "block" };
   const inp: React.CSSProperties = { flex: 1, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", color: "var(--ink)", padding: "10px 12px", fontSize: 14, fontFamily: "var(--body)", outline: "none", boxSizing: "border-box" };
 
@@ -841,6 +902,43 @@ function SettingsModal({ games, platforms, preferences, onSave, onSavePreference
         </div>
         <EditableList title="Platforms" icon={Gamepad2} items={platforms} field="platforms" usedCount={(v) => games.filter((g) => g.platform === v).length} />
 
+        <div style={{ borderTop: "1px solid var(--line)", paddingTop: 18, marginBottom: 22 }}>
+          <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}><Tag size={12} />Pricing</label>
+          <div style={{ fontSize: 11.5, color: "var(--ink-dim)", lineHeight: 1.5, marginBottom: 12 }}>
+            Shared with your household. When on, FILL also fetches a market value from the paid PriceCharting API (converted to € at the live rate) and picks the price matching each game&apos;s condition. Turn it off when you&apos;re not subscribed — values then stay manual.
+          </div>
+          <button role="switch" aria-checked={priceEnabled} onClick={() => onSave("pricecharting_enabled", !priceEnabled)}
+            style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 14px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", cursor: "pointer", color: "var(--ink)", textAlign: "left" }}>
+            <span style={{ fontSize: 13.5, fontWeight: 700 }}>Use PriceCharting API{priceEnabled && <span style={{ marginLeft: 8, fontSize: 10, color: "var(--accent2)", fontFamily: "var(--display)" }}>ACTIVE</span>}</span>
+            <span style={{ flexShrink: 0, position: "relative", width: 40, height: 23, borderRadius: 99, background: priceEnabled ? "var(--accent2)" : "var(--panel-alt)", border: "1px solid var(--line)", transition: "background .15s" }}>
+              <span style={{ position: "absolute", top: 2, left: priceEnabled ? 19 : 2, width: 17, height: 17, borderRadius: 99, background: priceEnabled ? "var(--bg)" : "var(--ink-dim)", transition: "left .15s" }} />
+            </span>
+          </button>
+
+          {priceEnabled && (
+          <div style={{ marginTop: 12 }}>
+            <label style={{ ...lbl, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+              API token{priceTokenSet && <span style={{ color: "var(--good)", fontSize: 10 }}>● SAVED</span>}
+            </label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input type="password" autoComplete="off" style={inp} value={tokenDraft} onChange={(e) => setTokenDraft(e.target.value)}
+                placeholder={priceTokenSet ? "•••••••••• — paste to replace" : "Paste your 40-char token"} />
+              <button onClick={() => { onSave("pricecharting_token", tokenDraft.trim()); setTokenDraft(""); }} disabled={!tokenDraft.trim()}
+                style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "0 14px", border: "none", borderRadius: "var(--radius)", cursor: tokenDraft.trim() ? "pointer" : "not-allowed", background: "var(--accent2)", color: "var(--bg)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 12, opacity: tokenDraft.trim() ? 1 : 0.5 }}>
+                <Check size={14} strokeWidth={3} /> SAVE
+              </button>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 6 }}>
+              <span style={{ fontSize: 10.5, color: "var(--ink-dim)", fontFamily: "var(--display)", lineHeight: 1.4 }}>
+                Stored for your household, used server-side — never shown back. Leave empty to use a server-set secret.
+              </span>
+              {priceTokenSet && <button onClick={() => { onSave("pricecharting_token", ""); setTokenDraft(""); }}
+                style={{ flexShrink: 0, background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--bad)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 10.5 }}>REMOVE</button>}
+            </div>
+          </div>
+          )}
+        </div>
+
         <div style={{ borderTop: "1px solid var(--line)", paddingTop: 18 }}>
           <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}><LayoutGrid size={12} />Overview sections</label>
           <div style={{ fontSize: 11.5, color: "var(--ink-dim)", lineHeight: 1.5, marginBottom: 12 }}>
@@ -887,8 +985,8 @@ const SCAN_CONSTRAINTS: MediaStreamConstraints = {
 };
 
 function ScannerModal({ resolve, onResolved, onClose }: {
-  resolve: (upc: string) => Promise<{ title: string | null; error?: string }>;
-  onResolved: (title: string) => void;
+  resolve: (upc: string) => Promise<{ title: string | null; error?: string; price?: PricePayload | null; pricecharting_id?: string | null }>;
+  onResolved: (res: ScanResult) => void;
   onClose: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -930,7 +1028,7 @@ function ScannerModal({ resolve, onResolved, onClose }: {
     setPhase("looking");
     try {
       const r = await resolve(code);
-      if (r?.title) { onResolved(r.title); return; }
+      if (r?.title) { onResolved({ title: r.title, upc: code, price: r.price ?? null, pricecharting_id: r.pricecharting_id ?? null }); return; }
       lastFailedRef.current = code; // don't loop-beep the same unmatched barcode
       setNote(
         r?.error === "rate_limited" ? "Daily lookup limit reached — type the title below instead." :

@@ -15,15 +15,25 @@ export function useVault(currentUserId: string) {
   const [platforms, setPlatforms] = useState<string[]>(DEFAULT_PLATFORMS);
   // Genres are a fixed, app-defined list — not user-editable.
   const genres = DEFAULT_GENRES;
+  // Shared feature flag: whether FILL also fetches prices from the paid
+  // PriceCharting API. Off unless explicitly turned on in Settings.
+  const [priceChartingEnabled, setPriceChartingEnabled] = useState(false);
+  // Whether a PriceCharting token is saved in app_settings. We deliberately never
+  // pull the token value itself to the client — only this boolean — so it stays
+  // server-side (the metadata API route reads the value to make the actual call).
+  const [priceChartingTokenSet, setPriceChartingTokenSet] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const [{ data: gs }, { data: prog }, { data: profs }, { data: settings }, { data: runs }] = await Promise.all([
+    const [{ data: gs }, { data: prog }, { data: profs }, { data: settings }, { data: runs }, { count: tokenCount }] = await Promise.all([
       supabase.from("games").select("*").order("created_at", { ascending: false }),
       supabase.from("progress").select("*"),
       supabase.from("profiles").select("*"),
-      supabase.from("app_settings").select("*"),
+      // Exclude the PriceCharting token row: it must never reach the browser.
+      supabase.from("app_settings").select("*").neq("key", "pricecharting_token"),
       supabase.from("playthroughs").select("*"),
+      // Head/count query: tells us a token exists without fetching its value.
+      supabase.from("app_settings").select("key", { count: "exact", head: true }).eq("key", "pricecharting_token"),
     ]);
     const byGame: Record<string, Game["progress"]> = {};
     (prog ?? []).forEach((p: any) => {
@@ -44,6 +54,8 @@ export function useVault(currentUserId: string) {
     const byKey: Record<string, any> = {};
     (settings ?? []).forEach((s: any) => { byKey[s.key] = s.value; });
     setPlatforms(Array.isArray(byKey.platforms) && byKey.platforms.length ? byKey.platforms : DEFAULT_PLATFORMS);
+    setPriceChartingEnabled(byKey.pricecharting_enabled === true);
+    setPriceChartingTokenSet((tokenCount ?? 0) > 0);
     setLoading(false);
   }, [supabase]);
 
@@ -109,11 +121,20 @@ export function useVault(currentUserId: string) {
     await load();
   }, [supabase, load]);
 
-  // Persist the editable platforms list to the shared settings store.
-  const saveSettings = useCallback(async (key: "platforms", value: string[]) => {
-    await supabase.from("app_settings").upsert({ key, value });
-    await load();
-  }, [supabase, load]);
+  // Persist a shared setting: the editable platforms list, the PriceCharting
+  // feature flag, or the PriceCharting token. All live in the app_settings store.
+  // An empty token deletes its row so the "token saved" status stays accurate.
+  const saveSettings = useCallback(
+    async (key: "platforms" | "pricecharting_enabled" | "pricecharting_token", value: string[] | boolean | string) => {
+      if (key === "pricecharting_token" && (typeof value !== "string" || value.trim() === "")) {
+        await supabase.from("app_settings").delete().eq("key", key);
+      } else {
+        await supabase.from("app_settings").upsert({ key, value });
+      }
+      await load();
+    },
+    [supabase, load],
+  );
 
   // Persist the current user's personal preferences (overview layout, etc.).
   // RLS limits the update to the user's own profile row.
@@ -122,5 +143,5 @@ export function useVault(currentUserId: string) {
     await load();
   }, [supabase, currentUserId, load]);
 
-  return { games, profiles, platforms, genres, loading, saveGame, deleteGame, saveSettings, savePreferences, reload: load };
+  return { games, profiles, platforms, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveSettings, savePreferences, reload: load };
 }

@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { priceByUpc, toEurPrice, usdToEurRate, readPriceConfig } from "@/lib/pricecharting";
 
-// Resolves a scanned barcode (UPC/EAN) to a game name. We use two free sources,
-// best-first, because IGDB itself has no barcode field:
+// Resolves a scanned barcode (UPC/EAN) to a game name. Sources, best-first:
 //
+//   0. PriceCharting — ONLY when the paid feature is on with a token set. Its UPC
+//      lookup is an exact-edition match and returns the price + product id in the
+//      same call, so a scanned game is named AND priced in one shot.
 //   1. levelcomplete.de — a video-game-specific barcode DB (~110k entries, EU/
-//      PAL coverage, returns clean titles + the IGDB id). Primary source.
+//      PAL coverage, returns clean titles + the IGDB id). Free fallback.
 //   2. UPCitemdb trial  — a broad general-product DB (~100 lookups/day per IP).
-//      Fallback for anything the game DB doesn't carry.
+//      Free fallback for anything the game DB doesn't carry.
 //
-// Both run server-side (CORS is locked on both), so on a shared host like Vercel
-// the UPCitemdb daily quota is shared across the server's IP. The resolved title
-// seeds the Add form, where the user taps FILL for full metadata.
+// The free sources run server-side (CORS is locked on both), so on a shared host
+// like Vercel the UPCitemdb daily quota is shared across the server's IP. The
+// resolved title (and any price) seeds the Add form, where the user taps FILL for
+// the rest of the metadata.
 
 // Browser-style UA: levelcomplete.de's public endpoint 403s non-browser agents.
 // It allows ~10 req/min — fine for scanning; see their integration note if usage
@@ -68,7 +72,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ title: null, error: "invalid" });
   }
 
-  // Try the game-specific DB first; it has the cleanest, most relevant matches.
+  // PriceCharting first when active: exact-edition name + price + id in one call.
+  // We pass the price straight back so the form is pre-priced without a second
+  // PriceCharting request at FILL time. A miss falls through to the free DBs.
+  const cfg = await readPriceConfig(supabase);
+  if (cfg.enabled && cfg.token) {
+    const [m, rate] = await Promise.all([priceByUpc(cfg.token, code), usdToEurRate()]);
+    if (m) {
+      return NextResponse.json({
+        title: m.name,
+        source: "pricecharting",
+        price: toEurPrice(m, rate),
+        pricecharting_id: m.pricechartingId || null,
+      });
+    }
+  }
+
+  // Try the game-specific free DB next; it has the cleanest, most relevant matches.
   const gameTitle = await fromLevelComplete(code);
   if (gameTitle) return NextResponse.json({ title: gameTitle, source: "levelcomplete" });
 
