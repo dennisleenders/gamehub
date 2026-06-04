@@ -17,17 +17,26 @@ export function useVault(currentUserId: string) {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const [{ data: gs }, { data: prog }, { data: profs }, { data: settings }] = await Promise.all([
+    const [{ data: gs }, { data: prog }, { data: profs }, { data: settings }, { data: runs }] = await Promise.all([
       supabase.from("games").select("*").order("created_at", { ascending: false }),
       supabase.from("progress").select("*"),
       supabase.from("profiles").select("*"),
       supabase.from("app_settings").select("*"),
+      supabase.from("playthroughs").select("*"),
     ]);
     const byGame: Record<string, Game["progress"]> = {};
     (prog ?? []).forEach((p: any) => {
-      (byGame[p.game_id] ||= {})![p.user_id] = { status: p.status, hours: Number(p.hours) };
+      (byGame[p.game_id] ||= {})![p.user_id] = { status: p.status, hours: Number(p.hours), updated_at: p.updated_at };
     });
-    setGames((gs ?? []).map((g: any) => ({ ...g, progress: byGame[g.id] ?? {} })));
+    // Group archived runs by game then user, oldest→newest (finish order).
+    const runsByGame: Record<string, NonNullable<Game["playthroughs"]>> = {};
+    (runs ?? []).forEach((r: any) => {
+      const byUser = (runsByGame[r.game_id] ||= {});
+      (byUser[r.user_id] ||= []).push({ ...r, hours: Number(r.hours) });
+    });
+    Object.values(runsByGame).forEach((byUser) =>
+      Object.values(byUser).forEach((list) => list.sort((a, b) => (a.finished_at < b.finished_at ? -1 : 1))));
+    setGames((gs ?? []).map((g: any) => ({ ...g, progress: byGame[g.id] ?? {}, playthroughs: runsByGame[g.id] ?? {} })));
     setProfiles(profs ?? []);
     // Settings are a small key/value store; fall back to the bundled defaults
     // if the table is empty or hasn't been migrated yet.
@@ -48,6 +57,7 @@ export function useVault(currentUserId: string) {
       .on("postgres_changes", { event: "*", schema: "public", table: "games" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "progress" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_settings" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "playthroughs" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [supabase, load]);
@@ -67,6 +77,24 @@ export function useVault(currentUserId: string) {
     }
     // Upsert the current user's own progress row.
     if (gameId && fields.status === "owned" && myStatus !== undefined) {
+      // Replay: if the current run is finished and we're switching back to
+      // playing, archive that completed run before the new session overwrites it.
+      if (myStatus === "playing") {
+        const { data: existing } = await supabase
+          .from("progress")
+          .select("status, hours, updated_at")
+          .eq("game_id", gameId)
+          .eq("user_id", currentUserId)
+          .maybeSingle();
+        if (existing?.status === "finished") {
+          await supabase.from("playthroughs").insert({
+            game_id: gameId,
+            user_id: currentUserId,
+            hours: existing.hours,
+            finished_at: existing.updated_at ?? new Date().toISOString(),
+          });
+        }
+      }
       await supabase.from("progress").upsert({
         game_id: gameId, user_id: currentUserId,
         status: myStatus, hours: myHours ?? 0,

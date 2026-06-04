@@ -11,7 +11,7 @@ import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { useVault } from "@/lib/useVault";
 import {
   type Game, type Profile, type PlayStatus, PLAY_STATUS, PLATFORM_TINT,
-  CONDITIONS, REGIONS, money,
+  CONDITIONS, REGIONS, money, fmtDate,
 } from "@/lib/types";
 
 const FALLBACK_TINTS = ["#9b8cff", "#6fc7b3", "#e6b667", "#e0738a", "#7fb2ff", "#c98cff"];
@@ -56,7 +56,6 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   owned.forEach((g) => playersOf(g).forEach(([pid, p]) => playingSlides.push({ g, pid, hours: p.hours })));
   playingSlides.sort((a, b) => (a.pid === uid ? 0 : 1) - (b.pid === uid ? 0 : 1));
 
-  const myPlaying = owned.filter((g) => getProg(g, uid).status === "playing").length;
   const myFinished = owned.filter((g) => getProg(g, uid).status === "finished").length;
   const myBacklog = owned.filter((g) => getProg(g, uid).status === "backlog").length;
 
@@ -64,6 +63,10 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
     .filter((x) => x.count).sort((a, b) => b.count - a.count);
   const maxCount = Math.max(1, ...byPlatform.map((x) => x.count));
   const recent = [...games];
+
+  // The open detail sheet tracks live data so edits/replays reflect immediately
+  // (detail only remembers WHICH game is open; the data comes from `games`).
+  const liveDetail = detail ? games.find((x) => x.id === detail.id) ?? detail : null;
 
   const filtered = useMemo(() => {
     const list = games.filter((g) => {
@@ -119,10 +122,12 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
                   <div style={{ fontSize: 15, color: "var(--ink-dim)", paddingBottom: 6 }}>games owned</div>
                 </div>
                 <div style={{ display: "flex", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
-                  <MiniStat icon={Gamepad2} label="PLAYING" value={myPlaying} color="var(--accent2)" />
-                  <MiniStat icon={Check} label="FINISHED" value={myFinished} color="var(--good)" />
-                  <MiniStat icon={Library} label="BACKLOG" value={myBacklog} color="var(--accent3)" />
-                  <MiniStat icon={Heart} label="WANTED" value={wishlist.length} color="var(--accent)" />
+                  <MiniStat icon={Library} label="BACKLOG" value={myBacklog} color="var(--accent3)"
+                    onClick={() => { setQ(""); setStatus("owned"); setPlatform("all"); setPlayerFilter(uid); setPlayFilter("backlog"); setView("collection"); }} />
+                  <MiniStat icon={Check} label="FINISHED" value={myFinished} color="var(--good)"
+                    onClick={() => { setQ(""); setStatus("owned"); setPlatform("all"); setPlayerFilter(uid); setPlayFilter("finished"); setView("collection"); }} />
+                  <MiniStat icon={Heart} label="WISHLIST" value={wishlist.length} color="var(--accent)"
+                    onClick={() => { setQ(""); setStatus("wishlist"); setPlatform("all"); setPlayerFilter("all"); setPlayFilter("all"); setView("collection"); }} />
                 </div>
               </section>
 
@@ -222,7 +227,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
         </div>
       </nav>
 
-      {detail && <DetailView game={detail} userById={userById} onClose={() => setDetail(null)} onEdit={() => setEditing(detail)} />}
+      {liveDetail && <DetailView game={liveDetail} userById={userById} onClose={() => setDetail(null)} onEdit={() => setEditing(liveDetail)} />}
       {editing !== null && (
         <GameModal game={editing} currentUser={currentUser} platforms={platforms} genres={genres}
           onClose={() => setEditing(null)}
@@ -242,16 +247,20 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
 }
 
 /* ---------- small shared bits ---------- */
-function MiniStat({ icon: Icon, label, value, color }: any) {
-  return (
-    <div style={{ flex: 1, minWidth: 92, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: "12px 14px" }}>
+function MiniStat({ icon: Icon, label, value, color, onClick }: any) {
+  const base: React.CSSProperties = { flex: 1, minWidth: 92, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: "12px 14px", textAlign: "left" };
+  const inner = (
+    <>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
         <Icon size={13} color={color} />
         <span style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>{label}</span>
       </div>
       <div style={{ fontFamily: "var(--display)", fontSize: 20, color }}>{value}</div>
-    </div>
+    </>
   );
+  return onClick
+    ? <button onClick={onClick} className="ministat" style={{ ...base, color: "var(--ink)" }}>{inner}</button>
+    : <div style={base}>{inner}</div>;
 }
 function SectionHead({ icon: Icon, accent, children }: any) {
   return (
@@ -279,7 +288,7 @@ function Cover({ g, ratio = 1.32, profiles }: { g: Game; ratio?: number; profile
     <div style={{ width: "100%", aspectRatio: `1 / ${ratio}`, borderRadius: "var(--radius)", position: "relative", overflow: "hidden", border: "1px solid var(--line)", background: `linear-gradient(150deg, ${tint}33, var(--panel-alt))` }}>
       {showArt ? <img src={g.cover!} alt={g.title} onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         : <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}><span style={{ fontFamily: "var(--display)", fontSize: 30, color: tint, opacity: .5 }}>{(g.title || "?")[0]}</span></div>}
-      {g.status === "wishlist" && <div style={{ position: "absolute", top: 7, right: 7, background: "#13111ad0", borderRadius: 99, padding: 4 }}><Heart size={12} color="var(--accent3)" fill="var(--accent3)" /></div>}
+      {g.status === "wishlist" && <div style={{ position: "absolute", top: 7, right: 7, background: "#13111ad0", borderRadius: 99, padding: 4 }}><Heart size={12} color="var(--accent)" fill="var(--accent)" /></div>}
       {g.status === "owned" && (players.length > 0 || finishers.length > 0) && (
         <div style={{ position: "absolute", top: 7, right: 7, display: "flex", gap: 4 }}>
           {players.map((u) => <span key={"p" + u.id} title={`${u.name} playing`} style={{ display: "grid", placeItems: "center", width: 19, height: 19, borderRadius: 99, background: "#13111aea", border: `1.5px solid ${u.color}` }}><span className="pulse" style={{ width: 7, height: 7, borderRadius: 99, background: u.color }} /></span>)}
@@ -299,7 +308,7 @@ function GameCard({ g, profiles, onClick }: { g: Game; profiles: Profile[]; onCl
         <div style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{g.title}</div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 5 }}>
           <span style={{ fontSize: 10, fontFamily: "var(--display)", fontWeight: 700, padding: "2px 7px", borderRadius: "var(--radius)", border: `1px solid ${tint}`, color: tint, background: tint + "1a" }}>{g.platform}</span>
-          <span style={{ fontSize: 11, fontFamily: "var(--display)", color: g.status === "owned" ? "var(--ink-dim)" : "var(--accent3)" }}>{g.status === "owned" ? money(g.value_cents) : "♡ wanted"}</span>
+          <span style={{ fontSize: 11, fontFamily: "var(--display)", color: g.status === "owned" ? "var(--ink-dim)" : "var(--accent)" }}>{g.status === "owned" ? money(g.value_cents) : "♡ wishlist"}</span>
         </div>
       </div>
     </button>
@@ -466,7 +475,7 @@ function DetailView({ game, userById, onClose, onEdit }: { game: Game; userById:
               {(g.developer || g.publisher) && <div style={{ fontSize: 12, color: "var(--ink-dim)", marginTop: 8 }}>{g.developer}{g.developer && g.publisher && g.developer !== g.publisher ? " · " : ""}{g.publisher !== g.developer ? g.publisher : ""}</div>}
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
                 {g.rating != null && <div style={{ display: "inline-flex", alignItems: "baseline", gap: 3, padding: "4px 9px", borderRadius: "var(--radius)", border: `1px solid ${ratingColor}`, background: ratingColor + "1a" }}><span style={{ fontFamily: "var(--display)", fontSize: 13, color: ratingColor }}>{g.rating}</span><span style={{ fontSize: 9, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>/100</span></div>}
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontFamily: "var(--display)", color: g.status === "owned" ? "var(--good)" : "var(--accent3)" }}>{g.status === "owned" ? <><Box size={13} /> IN COLLECTION</> : <><Heart size={13} /> WISHLIST</>}</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontFamily: "var(--display)", color: g.status === "owned" ? "var(--good)" : "var(--accent)" }}>{g.status === "owned" ? <><Box size={13} /> IN COLLECTION</> : <><Heart size={13} /> WISHLIST</>}</span>
               </div>
             </div>
           </div>
@@ -478,11 +487,18 @@ function DetailView({ game, userById, onClose, onEdit }: { game: Game; userById:
               <div style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", marginBottom: 8 }}>WHO&apos;S PLAYED IT</div>
               <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", overflow: "hidden" }}>
                 {(() => {
-                  const rows = progressEntries(g).map(([id, p]) => ({ u: userById(id), p })).filter((r) => r.u && r.p.status !== "backlog").sort((a, b) => (a.p.status === "playing" ? 0 : 1) - (b.p.status === "playing" ? 0 : 1));
+                  const rows = progressEntries(g).map(([id, p]) => ({ u: userById(id), p, runs: g.playthroughs?.[id] ?? [] }))
+                    .filter((r) => r.u && (r.p.status !== "backlog" || r.runs.length))
+                    .sort((a, b) => (a.p.status === "playing" ? 0 : 1) - (b.p.status === "playing" ? 0 : 1));
                   if (!rows.length) return <div style={{ padding: "14px 16px", fontSize: 13, color: "var(--ink-dim)" }}>Nobody&apos;s started this yet.</div>;
-                  return rows.map(({ u, p }, i) => {
+                  return rows.map(({ u, p, runs }, i) => {
                     const target = g.hltb?.main || null;
                     const pct = target ? Math.min(100, Math.round((p.hours / target) * 100)) : null;
+                    // Full completion history = archived runs + the current run if it's finished.
+                    const history = [
+                      ...runs.map((r) => ({ key: r.id, hours: r.hours, finished_at: r.finished_at })),
+                      ...(p.status === "finished" ? [{ key: "current", hours: p.hours, finished_at: p.updated_at }] : []),
+                    ];
                     return (
                       <div key={u!.id} style={{ padding: "13px 16px", borderTop: i ? "1px solid var(--line)" : "none" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -496,6 +512,21 @@ function DetailView({ game, userById, onClose, onEdit }: { game: Game; userById:
                           <span style={{ fontFamily: "var(--display)", fontSize: 13, marginLeft: 4 }}>{p.hours}h</span>
                         </div>
                         {target && p.status === "playing" && <div style={{ marginTop: 10 }}><div style={{ height: 6, background: "var(--panel)", borderRadius: 99, overflow: "hidden", border: "1px solid var(--line)" }}><div style={{ height: "100%", width: `${pct}%`, background: u!.color, borderRadius: 99 }} /></div></div>}
+                        {history.length > 0 && (
+                          <div style={{ marginTop: 11, paddingTop: 10, borderTop: "1px dashed var(--line)" }}>
+                            <div style={{ fontSize: 8.5, letterSpacing: 1.2, color: "var(--ink-dim)", fontFamily: "var(--display)", marginBottom: 6 }}>
+                              PLAYTHROUGHS · {history.length}{p.status === "playing" && runs.length > 0 ? " + REPLAYING" : ""}
+                            </div>
+                            {history.map((r, idx) => (
+                              <div key={r.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, fontSize: 11.5, padding: "3px 0", color: "var(--ink-dim)", fontFamily: "var(--display)" }}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                                  <Check size={11} strokeWidth={3} color="var(--good)" /> Run {idx + 1} · {r.hours}h
+                                </span>
+                                <span>{fmtDate(r.finished_at)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   });
@@ -552,6 +583,17 @@ function GameModal({ game, currentUser, platforms, genres, onSave, onDelete, onC
   });
   const [fetchState, setFetchState] = useState<"idle" | "loading" | "done" | "empty">("idle");
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
+
+  // Replay handling: completions so far, and whether this edit starts a new run.
+  const completions = (game.playthroughs?.[currentUser.id]?.length ?? 0) + (myProg.status === "finished" ? 1 : 0);
+  const startingReplay = myProg.status === "finished" && f.myStatus === "playing";
+  const pickStatus = (k: string) => {
+    // Only matters when the saved run is finished. Switching to playing starts a
+    // fresh session (0h); switching back restores the finished run's hours so a
+    // toggle doesn't silently wipe them before save.
+    if (myProg.status === "finished") set("myHours", k === "playing" ? "" : (myProg.hours ?? ""));
+    set("myStatus", k);
+  };
 
   const autoFill = async () => {
     if (!f.title.trim()) return;
@@ -621,11 +663,17 @@ function GameModal({ game, currentUser, platforms, genres, onSave, onDelete, onC
 
         {f.status === "owned" && (
           <div style={{ marginBottom: 14 }}>
-            <label style={lbl}>YOUR PLAY STATUS · {currentUser.name}</label>
+            <label style={lbl}>YOUR PLAY STATUS · {currentUser.name}{completions > 0 && <span style={{ color: "var(--good)" }}> · COMPLETED {completions}×</span>}</label>
             <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              {Object.entries(PLAY_STATUS).map(([k, v]) => { const on = f.myStatus === k; return <button key={k} onClick={() => set("myStatus", k)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 0", border: `1px solid ${on ? playColor(k) : "var(--line)"}`, borderRadius: "var(--radius)", cursor: "pointer", background: on ? playColor(k) + "22" : "var(--bg)", color: on ? "var(--ink)" : "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 11 }}>{k === "finished" && <Check size={13} strokeWidth={3} />}{v.short}</button>; })}
+              {Object.entries(PLAY_STATUS).map(([k, v]) => { const on = f.myStatus === k; return <button key={k} onClick={() => pickStatus(k)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 0", border: `1px solid ${on ? playColor(k) : "var(--line)"}`, borderRadius: "var(--radius)", cursor: "pointer", background: on ? playColor(k) + "22" : "var(--bg)", color: on ? "var(--ink)" : "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 11 }}>{k === "finished" && <Check size={13} strokeWidth={3} />}{v.short}</button>; })}
             </div>
-            <label style={lbl}>YOUR HOURS PLAYED</label>
+            {startingReplay && (
+              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12, padding: "9px 11px", borderRadius: "var(--radius)", background: "var(--accent2)1a", border: "1px solid var(--accent2)", fontSize: 11.5, color: "var(--ink)", lineHeight: 1.4 }}>
+                <Sparkles size={14} color="var(--accent2)" style={{ flexShrink: 0 }} />
+                New playthrough — your finished run ({myProg.hours}h) will be saved to history.
+              </div>
+            )}
+            <label style={lbl}>YOUR HOURS PLAYED{startingReplay && " · NEW SESSION"}</label>
             <input style={inp} type="number" value={f.myHours} onChange={(e) => set("myHours", e.target.value)} placeholder="0" />
           </div>
         )}

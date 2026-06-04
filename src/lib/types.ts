@@ -15,6 +15,16 @@ export interface ProgressRow {
   hours: number;
 }
 
+// An archived, completed run of a game by a user. The live `progress` row holds
+// the current run; finished runs are copied here when a replay starts.
+export interface Playthrough {
+  id: string;
+  game_id: string;
+  user_id: string;
+  hours: number;
+  finished_at: string;
+}
+
 export interface Game {
   id: string;
   title: string;
@@ -38,8 +48,10 @@ export interface Game {
   pricecharting_id?: string | null;
   added_by?: string | null;
   created_at?: string;
-  // Joined client-side: { [userId]: { status, hours } }
-  progress?: Record<string, { status: PlayStatus; hours: number }>;
+  // Joined client-side: { [userId]: { status, hours, updated_at } } — the current run.
+  progress?: Record<string, { status: PlayStatus; hours: number; updated_at?: string }>;
+  // Joined client-side: { [userId]: Playthrough[] } — archived completed runs, oldest→newest.
+  playthroughs?: Record<string, Playthrough[]>;
 }
 
 export const DEFAULT_PLATFORMS = ["PS1", "PS2", "PS3", "PS4", "PS5", "DS", "3DS"];
@@ -60,3 +72,6 @@ export const PLATFORM_TINT: Record<string, string> = {
 
 export const money = (cents?: number | null) =>
   "€" + Math.round((cents ?? 0) / 100).toLocaleString("nl-NL");
+
+export const fmtDate = (iso?: string | null) =>
+  iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
