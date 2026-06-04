@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { DEFAULT_PLATFORMS, DEFAULT_GENRES } from "@/lib/types";
-import type { Game, Profile, PlayStatus } from "@/lib/types";
+import type { Game, Profile, PlayStatus, Challenge } from "@/lib/types";
 
 // Central data layer. Replaces the PoC's in-memory state + window.storage with
 // live Supabase queries, while preserving the same shape the UI expects
@@ -12,6 +12,9 @@ export function useVault(currentUserId: string) {
   const supabase = createClient();
   const [games, setGames] = useState<Game[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  // Shared, household-wide challenges. Only the definitions live in the DB;
+  // each user's progress is derived client-side from completions.
+  const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [platforms, setPlatforms] = useState<string[]>(DEFAULT_PLATFORMS);
   // Genres are a fixed, app-defined list — not user-editable.
   const genres = DEFAULT_GENRES;
@@ -25,13 +28,14 @@ export function useVault(currentUserId: string) {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const [{ data: gs }, { data: prog }, { data: profs }, { data: settings }, { data: runs }, { count: tokenCount }] = await Promise.all([
+    const [{ data: gs }, { data: prog }, { data: profs }, { data: settings }, { data: runs }, { data: chals }, { count: tokenCount }] = await Promise.all([
       supabase.from("games").select("*").order("created_at", { ascending: false }),
       supabase.from("progress").select("*"),
       supabase.from("profiles").select("*"),
       // Exclude the PriceCharting token row: it must never reach the browser.
       supabase.from("app_settings").select("*").neq("key", "pricecharting_token"),
       supabase.from("playthroughs").select("*"),
+      supabase.from("challenges").select("*").order("created_at", { ascending: false }),
       // Head/count query: tells us a token exists without fetching its value.
       supabase.from("app_settings").select("key", { count: "exact", head: true }).eq("key", "pricecharting_token"),
     ]);
@@ -49,6 +53,7 @@ export function useVault(currentUserId: string) {
       Object.values(byUser).forEach((list) => list.sort((a, b) => (a.finished_at < b.finished_at ? -1 : 1))));
     setGames((gs ?? []).map((g: any) => ({ ...g, progress: byGame[g.id] ?? {}, playthroughs: runsByGame[g.id] ?? {} })));
     setProfiles(profs ?? []);
+    setChallenges(chals ?? []);
     // Settings are a small key/value store; fall back to the bundled defaults
     // if the table is empty or hasn't been migrated yet.
     const byKey: Record<string, any> = {};
@@ -71,6 +76,7 @@ export function useVault(currentUserId: string) {
       .on("postgres_changes", { event: "*", schema: "public", table: "app_settings" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "playthroughs" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "challenges" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [supabase, load]);
@@ -121,6 +127,21 @@ export function useVault(currentUserId: string) {
     await load();
   }, [supabase, load]);
 
+  // Create or update a challenge. New ones are stamped with the current user as
+  // creator (RLS requires created_by = auth.uid() on insert, and limits later
+  // edits/deletes to the creator).
+  const saveChallenge = useCallback(async (c: Partial<Challenge>) => {
+    const { id, ...fields } = c as any;
+    if (id) await supabase.from("challenges").update(fields).eq("id", id);
+    else await supabase.from("challenges").insert({ ...fields, created_by: currentUserId });
+    await load();
+  }, [supabase, currentUserId, load]);
+
+  const deleteChallenge = useCallback(async (id: string) => {
+    await supabase.from("challenges").delete().eq("id", id);
+    await load();
+  }, [supabase, load]);
+
   // Persist a shared setting: the editable platforms list, the PriceCharting
   // feature flag, or the PriceCharting token. All live in the app_settings store.
   // An empty token deletes its row so the "token saved" status stays accurate.
@@ -143,5 +164,5 @@ export function useVault(currentUserId: string) {
     await load();
   }, [supabase, currentUserId, load]);
 
-  return { games, profiles, platforms, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveSettings, savePreferences, reload: load };
+  return { games, profiles, challenges, platforms, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences, reload: load };
 }

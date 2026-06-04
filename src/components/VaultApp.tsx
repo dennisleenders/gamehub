@@ -9,6 +9,7 @@ import {
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { useVault } from "@/lib/useVault";
+import AchievementsView, { CreateChallengeModal, RankingBoard } from "@/components/AchievementsView";
 import {
   type Game, type Profile, type PlayStatus, PLAY_STATUS, PLATFORM_TINT,
   CONDITIONS, REGIONS, OVERVIEW_SECTIONS, money, fmtDate,
@@ -42,7 +43,7 @@ const finishersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status =
 
 export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   const uid = currentUser.id;
-  const { games, profiles, platforms, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveSettings, savePreferences } = useVault(uid);
+  const { games, profiles, challenges, platforms, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences } = useVault(uid);
   const userById = (id?: string | null) => profiles.find((p) => p.id === id) || null;
 
   // Live current profile (reflects reloads after saving prefs); falls back to the
@@ -50,12 +51,17 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   const me = profiles.find((p) => p.id === uid) ?? currentUser;
   const showSection = (key: string) => me.preferences?.overview?.[key] !== false;
 
-  const [view, setView] = useState<"home" | "collection">("home");
+  const [view, setView] = useState<"home" | "collection" | "achievements">("home");
   const [detail, setDetail] = useState<Game | null>(null);
   const [editing, setEditing] = useState<GameSeed | null>(null);
   const [userMenu, setUserMenu] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
+  const [creatingChallenge, setCreatingChallenge] = useState(false);
+
+  // Switching views (via the bottom nav or a dashboard shortcut) should always
+  // land you at the top of the new page rather than keeping the old scroll.
+  useEffect(() => { window.scrollTo(0, 0); }, [view]);
 
   const resolveUpc = async (upc: string): Promise<{ title: string | null; error?: string; price?: PricePayload | null; pricecharting_id?: string | null }> => {
     const r = await fetch("/api/upc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ upc }) });
@@ -161,6 +167,13 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
                     onClick={() => { setQ(""); setStatus("wishlist"); setPlatform("all"); setPlayerFilter("all"); setPlayFilter("all"); setView("collection"); }} />
                 </div>
               </section>
+
+              {showSection("ranking") && (
+              <section>
+                <SectionHead icon={Trophy} accent="var(--accent3)">RANKING</SectionHead>
+                <RankingBoard games={games} profiles={profiles} currentUser={me} />
+              </section>
+              )}
 
               {showSection("recently_added") && (
               <section>
@@ -284,15 +297,24 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
         </div>
       )}
 
+      {view === "achievements" && (
+        <div style={{ position: "relative", maxWidth: 940, margin: "0 auto", padding: "0 16px 110px" }}>
+          {topbar(false)}
+          <AchievementsView games={games} profiles={profiles} challenges={challenges} currentUser={me}
+            deleteChallenge={deleteChallenge}
+            onCreateChallenge={() => setCreatingChallenge(true)} />
+        </div>
+      )}
+
       <nav style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 30, display: "flex", justifyContent: "center",
         padding: "10px 16px calc(10px + env(safe-area-inset-bottom))", background: "linear-gradient(to top, var(--bg) 60%, transparent)", pointerEvents: "none" }}>
         <div style={{ display: "flex", gap: 6, background: "var(--panel)", padding: 5, borderRadius: 99, border: "1px solid var(--line)", boxShadow: "0 8px 28px -8px #000", pointerEvents: "auto" }}>
-          {([["home", "DASHBOARD", CircleUser], ["collection", "COLLECTION", LayoutGrid]] as const).map(([k, lbl, Ic]) => (
-            <button key={k} onClick={() => setView(k)}
-              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "10px 22px", border: "none", cursor: "pointer",
+          {([["home", "DASHBOARD", CircleUser], ["collection", "COLLECTION", LayoutGrid], ["achievements", "ACHIEVEMENTS", Trophy]] as const).map(([k, lbl, Ic]) => (
+            <button key={k} onClick={() => setView(k)} aria-label={lbl} className="nav-pill"
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: "none", cursor: "pointer",
                 borderRadius: 99, fontFamily: "var(--display)", fontWeight: 700, fontSize: 12, letterSpacing: 1,
                 background: view === k ? "var(--accent)" : "transparent", color: view === k ? "var(--bg)" : "var(--ink-dim)" }}>
-              <Ic size={15} strokeWidth={2.5} /> {lbl}
+              <Ic size={15} strokeWidth={2.5} /> <span className="nav-label">{lbl}</span>
             </button>
           ))}
         </div>
@@ -308,6 +330,10 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
       {settingsOpen && (
         <SettingsModal games={games} platforms={platforms} preferences={me.preferences} priceEnabled={priceChartingEnabled} priceTokenSet={priceChartingTokenSet}
           onSave={saveSettings} onSavePreferences={savePreferences} onClose={() => setSettingsOpen(false)} />
+      )}
+      {creatingChallenge && (
+        <CreateChallengeModal currentUser={me} onClose={() => setCreatingChallenge(false)}
+          onSave={async (c) => { await saveChallenge(c); setCreatingChallenge(false); }} />
       )}
       {scanOpen && (
         <ScannerModal resolve={resolveUpc} onClose={() => setScanOpen(false)}

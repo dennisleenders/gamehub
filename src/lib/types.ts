@@ -15,6 +15,7 @@ export interface Profile {
 // stats are fixed and intentionally absent. Drives both the Settings toggles and
 // the render gating in VaultApp.
 export const OVERVIEW_SECTIONS = [
+  { key: "ranking", label: "Ranking" },
   { key: "recently_added", label: "Recently Added" },
   { key: "recently_played", label: "Recently Played" },
   { key: "most_valued", label: "Most Valued" },
@@ -37,6 +38,24 @@ export interface Playthrough {
   user_id: string;
   hours: number;
   finished_at: string;
+}
+
+// A shared, household-wide challenge (a "race"). Currently the only kind is
+// "complete N games within a date window"; `type` stays a union so the create
+// form's picker and the client-side progress switch remain exhaustive. Only the
+// definition is stored — each user's progress is computed live from completions.
+export type ChallengeType = "complete_games";
+
+export interface Challenge {
+  id: string;
+  title: string;
+  type: ChallengeType;
+  target: number;
+  period_start: string; // 'YYYY-MM-DD'
+  period_end: string;   // 'YYYY-MM-DD'
+  created_by?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Game {
