@@ -57,6 +57,7 @@ export function useVault(currentUserId: string) {
       .on("postgres_changes", { event: "*", schema: "public", table: "games" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "progress" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_settings" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "playthroughs" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
@@ -114,5 +115,12 @@ export function useVault(currentUserId: string) {
     await load();
   }, [supabase, load]);
 
-  return { games, profiles, platforms, genres, loading, saveGame, deleteGame, saveSettings, reload: load };
+  // Persist the current user's personal preferences (overview layout, etc.).
+  // RLS limits the update to the user's own profile row.
+  const savePreferences = useCallback(async (preferences: Profile["preferences"]) => {
+    await supabase.from("profiles").update({ preferences }).eq("id", currentUserId);
+    await load();
+  }, [supabase, currentUserId, load]);
+
+  return { games, profiles, platforms, genres, loading, saveGame, deleteGame, saveSettings, savePreferences, reload: load };
 }

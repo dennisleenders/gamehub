@@ -6,7 +6,21 @@ export interface Profile {
   id: string;
   name: string;
   color: string;
+  // Per-user personal settings (not shared with the household). `overview` maps
+  // a section key to its visibility; a section shows unless explicitly false.
+  preferences?: { overview?: Record<string, boolean> };
 }
+
+// The overview sections each user can show/hide. The hero and "Your Collection"
+// stats are fixed and intentionally absent. Drives both the Settings toggles and
+// the render gating in VaultApp.
+export const OVERVIEW_SECTIONS = [
+  { key: "recently_added", label: "Recently Added" },
+  { key: "recently_played", label: "Recently Played" },
+  { key: "most_valued", label: "Most Valued" },
+  { key: "by_system", label: "By System" },
+  { key: "collection_value", label: "Estimated Value" },
+] as const;
 
 export interface ProgressRow {
   game_id: string;

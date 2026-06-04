@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Search, Plus, X, Gamepad2, Trophy, Heart, Disc, LayoutGrid, Sparkles, Check, Box,
+  Search, Plus, X, Gamepad2, Trophy, Heart, Disc, LayoutGrid, Sparkles, Check, Box, CircleUser,
   ChevronLeft, ChevronDown, Pencil, Loader2, ImageIcon, Wand2, Library, Joystick,
   ScanLine, Settings, LogOut, Clock,
 } from "lucide-react";
@@ -11,7 +11,7 @@ import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { useVault } from "@/lib/useVault";
 import {
   type Game, type Profile, type PlayStatus, PLAY_STATUS, PLATFORM_TINT,
-  CONDITIONS, REGIONS, money, fmtDate,
+  CONDITIONS, REGIONS, OVERVIEW_SECTIONS, money, fmtDate,
 } from "@/lib/types";
 
 const FALLBACK_TINTS = ["#9b8cff", "#6fc7b3", "#e6b667", "#e0738a", "#7fb2ff", "#c98cff"];
@@ -25,8 +25,13 @@ const finishersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status =
 
 export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   const uid = currentUser.id;
-  const { games, profiles, platforms, genres, loading, saveGame, deleteGame, saveSettings } = useVault(uid);
+  const { games, profiles, platforms, genres, loading, saveGame, deleteGame, saveSettings, savePreferences } = useVault(uid);
   const userById = (id?: string | null) => profiles.find((p) => p.id === id) || null;
+
+  // Live current profile (reflects reloads after saving prefs); falls back to the
+  // server-passed prop before the first load completes.
+  const me = profiles.find((p) => p.id === uid) ?? currentUser;
+  const showSection = (key: string) => me.preferences?.overview?.[key] !== false;
 
   const [view, setView] = useState<"home" | "collection">("home");
   const [detail, setDetail] = useState<Game | null>(null);
@@ -139,6 +144,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
                 </div>
               </section>
 
+              {showSection("recently_added") && (
               <section>
                 <SectionHead icon={Sparkles} accent="var(--accent)">RECENTLY ADDED</SectionHead>
                 <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }} className="hide-scroll">
@@ -151,8 +157,9 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
                   ))}
                 </div>
               </section>
+              )}
 
-              {recentlyPlayed.length > 0 && (
+              {showSection("recently_played") && recentlyPlayed.length > 0 && (
                 <section>
                   <SectionHead icon={Joystick} accent="var(--accent2)">RECENTLY PLAYED</SectionHead>
                   <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }} className="hide-scroll">
@@ -171,7 +178,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
                 </section>
               )}
 
-              {mostValued.length > 0 && (
+              {showSection("most_valued") && mostValued.length > 0 && (
                 <section>
                   <SectionHead icon={Trophy} accent="var(--accent3)">MOST VALUED</SectionHead>
                   <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }} className="hide-scroll">
@@ -186,6 +193,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
                 </section>
               )}
 
+              {showSection("by_system") && (
               <section>
                 <SectionHead icon={Gamepad2} accent="var(--accent2)">BY SYSTEM</SectionHead>
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -201,13 +209,16 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
                   ))}
                 </div>
               </section>
+              )}
 
+              {showSection("collection_value") && (
               <section>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: "13px 16px" }}>
                   <div style={{ fontSize: 11, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>EST. COLLECTION VALUE</div>
                   <span style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: 15 }}>{money(collectionValue)}</span>
                 </div>
               </section>
+              )}
             </div>
           </div>
         </>
@@ -258,7 +269,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
       <nav style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 30, display: "flex", justifyContent: "center",
         padding: "10px 16px calc(10px + env(safe-area-inset-bottom))", background: "linear-gradient(to top, var(--bg) 60%, transparent)", pointerEvents: "none" }}>
         <div style={{ display: "flex", gap: 6, background: "var(--panel)", padding: 5, borderRadius: 99, border: "1px solid var(--line)", boxShadow: "0 8px 28px -8px #000", pointerEvents: "auto" }}>
-          {([["home", "OVERVIEW", Trophy], ["collection", "COLLECTION", LayoutGrid]] as const).map(([k, lbl, Ic]) => (
+          {([["home", "DASHBOARD", CircleUser], ["collection", "COLLECTION", LayoutGrid]] as const).map(([k, lbl, Ic]) => (
             <button key={k} onClick={() => setView(k)}
               style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "10px 22px", border: "none", cursor: "pointer",
                 borderRadius: 99, fontFamily: "var(--display)", fontWeight: 700, fontSize: 12, letterSpacing: 1,
@@ -277,8 +288,8 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
           onDelete={async (id) => { await deleteGame(id); setEditing(null); setDetail(null); }} />
       )}
       {settingsOpen && (
-        <SettingsModal games={games} platforms={platforms}
-          onSave={saveSettings} onClose={() => setSettingsOpen(false)} />
+        <SettingsModal games={games} platforms={platforms} preferences={me.preferences}
+          onSave={saveSettings} onSavePreferences={savePreferences} onClose={() => setSettingsOpen(false)} />
       )}
       {scanOpen && (
         <ScannerModal resolve={resolveUpc} onClose={() => setScanOpen(false)}
@@ -766,9 +777,11 @@ function GameModal({ game, currentUser, platforms, genres, onSave, onDelete, onC
   );
 }
 
-function SettingsModal({ games, platforms, onSave, onClose }: {
-  games: Game[]; platforms: string[];
-  onSave: (key: "platforms", value: string[]) => void; onClose: () => void;
+function SettingsModal({ games, platforms, preferences, onSave, onSavePreferences, onClose }: {
+  games: Game[]; platforms: string[]; preferences: Profile["preferences"];
+  onSave: (key: "platforms", value: string[]) => void;
+  onSavePreferences: (preferences: Profile["preferences"]) => void;
+  onClose: () => void;
 }) {
   const lbl: React.CSSProperties = { fontSize: 10, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, marginBottom: 8, display: "block" };
   const inp: React.CSSProperties = { flex: 1, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", color: "var(--ink)", padding: "10px 12px", fontSize: 14, fontFamily: "var(--body)", outline: "none", boxSizing: "border-box" };
@@ -827,6 +840,28 @@ function SettingsModal({ games, platforms, onSave, onClose }: {
           Curate the platforms shared across your household. Changes save instantly.
         </div>
         <EditableList title="Platforms" icon={Gamepad2} items={platforms} field="platforms" usedCount={(v) => games.filter((g) => g.platform === v).length} />
+
+        <div style={{ borderTop: "1px solid var(--line)", paddingTop: 18 }}>
+          <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}><LayoutGrid size={12} />Overview sections</label>
+          <div style={{ fontSize: 11.5, color: "var(--ink-dim)", lineHeight: 1.5, marginBottom: 12 }}>
+            Just for you — pick which blocks show on your overview. The hero and your collection stats always stay.
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", border: "1px solid var(--line)", borderRadius: "var(--radius)", overflow: "hidden" }}>
+            {OVERVIEW_SECTIONS.map(({ key, label }, i) => {
+              const on = preferences?.overview?.[key] !== false;
+              return (
+                <button key={key} role="switch" aria-checked={on}
+                  onClick={() => onSavePreferences({ ...preferences, overview: { ...preferences?.overview, [key]: !on } })}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 14px", background: "var(--bg)", border: "none", borderTop: i ? "1px solid var(--line)" : "none", cursor: "pointer", color: "var(--ink)", textAlign: "left" }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 700 }}>{label}</span>
+                  <span style={{ flexShrink: 0, position: "relative", width: 40, height: 23, borderRadius: 99, background: on ? "var(--accent2)" : "var(--panel-alt)", border: "1px solid var(--line)", transition: "background .15s" }}>
+                    <span style={{ position: "absolute", top: 2, left: on ? 19 : 2, width: 17, height: 17, borderRadius: 99, background: on ? "var(--bg)" : "var(--ink-dim)", transition: "left .15s" }} />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
