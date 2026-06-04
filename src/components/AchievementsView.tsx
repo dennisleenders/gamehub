@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import type { Challenge, ChallengeType, Game, Profile } from "@/lib/types";
 import { fmtDate } from "@/lib/types";
+import { Avatar } from "@/components/Avatar";
 import {
   ACHIEVEMENTS, computeStatsByUser, computeRanking, challengeStandings, challengePhase,
   evaluateAchievement, TOTAL_TIERS, TIER_COLOR, TIER_LABEL, type UserStats, type AchievementDef,
@@ -13,14 +14,6 @@ import {
 
 const CHALLENGE_TYPES: [ChallengeType, string][] = [["complete_games", "Complete games"]];
 
-/* ---------- small shared bits (mirrors of VaultApp's, kept local) ---------- */
-function Avatar({ user, size = 22 }: { user: Profile; size?: number }) {
-  return (
-    <span style={{ display: "inline-grid", placeItems: "center", width: size, height: size, borderRadius: 99, background: user.color + "30", border: `1px solid ${user.color}`, color: "var(--ink)", fontFamily: "var(--display)", fontWeight: 700, fontSize: size * 0.42, flexShrink: 0 }}>
-      {user.name[0].toUpperCase()}
-    </span>
-  );
-}
 function SectionHead({ icon: Icon, accent, action, children }: { icon: any; accent: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>

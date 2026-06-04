@@ -11,6 +11,8 @@ import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { useVault } from "@/lib/useVault";
 import AchievementsView, { CreateChallengeModal, RankingBoard } from "@/components/AchievementsView";
 import { useAchievementToasts } from "@/components/useAchievementToasts";
+import { Avatar, AvatarPickerModal } from "@/components/Avatar";
+import { avatarSrc } from "@/lib/avatars";
 import {
   type Game, type Profile, type PlayStatus, PLAY_STATUS, PLATFORM_TINT,
   CONDITIONS, REGIONS, OVERVIEW_SECTIONS, money, fmtDate,
@@ -44,7 +46,7 @@ const finishersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status =
 
 export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   const uid = currentUser.id;
-  const { games, profiles, challenges, platforms, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences } = useVault(uid);
+  const { games, profiles, challenges, platforms, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences, saveProfile } = useVault(uid);
   const userById = (id?: string | null) => profiles.find((p) => p.id === id) || null;
 
   // Live current profile (reflects reloads after saving prefs); falls back to the
@@ -59,6 +61,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [creatingChallenge, setCreatingChallenge] = useState(false);
+  const [avatarOpen, setAvatarOpen] = useState(false);
 
   // Switching views (via the bottom nav or a dashboard shortcut) should always
   // land you at the top of the new page rather than keeping the old scroll.
@@ -141,9 +144,10 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   }
 
   const topbar = (floating: boolean) => (
-    <TopBar floating={floating} currentUser={currentUser} userMenu={userMenu} setUserMenu={setUserMenu}
+    <TopBar floating={floating} currentUser={me} userMenu={userMenu} setUserMenu={setUserMenu}
       onScan={() => setScanOpen(true)}
       onSettings={() => setSettingsOpen(true)}
+      onChooseAvatar={() => setAvatarOpen(true)}
       onAdd={() => setEditing({})} />
   );
 
@@ -340,6 +344,9 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
         <CreateChallengeModal currentUser={me} onClose={() => setCreatingChallenge(false)}
           onSave={async (c) => { await saveChallenge(c); setCreatingChallenge(false); }} />
       )}
+      {avatarOpen && (
+        <AvatarPickerModal currentUser={me} onClose={() => setAvatarOpen(false)} onSave={saveProfile} />
+      )}
       {scanOpen && (
         <ScannerModal resolve={resolveUpc} onClose={() => setScanOpen(false)}
           onResolved={(res) => {
@@ -376,13 +383,6 @@ function SectionHead({ icon: Icon, accent, children }: any) {
       <Icon size={15} color={accent} />
       <span style={{ fontSize: 12, letterSpacing: 1.5, fontFamily: "var(--display)", fontWeight: 700 }}>{children}</span>
     </div>
-  );
-}
-function Avatar({ user, size = 22 }: { user: Profile; size?: number }) {
-  return (
-    <span style={{ display: "inline-grid", placeItems: "center", width: size, height: size, borderRadius: 99, background: user.color + "30", border: `1px solid ${user.color}`, color: "var(--ink)", fontFamily: "var(--display)", fontWeight: 700, fontSize: size * 0.42, flexShrink: 0 }}>
-      {user.name[0].toUpperCase()}
-    </span>
   );
 }
 
@@ -439,11 +439,12 @@ function FilterField({ label, value, onChange, options, compact }: { label?: str
   );
 }
 
-function TopBar({ floating, currentUser, userMenu, setUserMenu, onScan, onSettings, onAdd }: any) {
+function TopBar({ floating, currentUser, userMenu, setUserMenu, onScan, onSettings, onChooseAvatar, onAdd }: any) {
   const glass = floating
     ? { background: "rgba(20,17,26,0.34)", border: "1px solid rgba(255,255,255,0.14)", backdropFilter: "blur(10px)" as const }
     : { background: "var(--panel)", border: "1px solid var(--line)" };
   const iconBtn: React.CSSProperties = { display: "grid", placeItems: "center", width: 38, height: 38, borderRadius: 99, cursor: "pointer", color: floating ? "#fff" : "var(--ink)", ...glass };
+  const myAvatar = avatarSrc(currentUser.avatar);
   return (
     <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: floating ? "16px 16px 14px" : "16px 0", position: "relative" }}>
       <div style={{ fontFamily: "var(--display)", fontSize: 19, letterSpacing: 1.5, fontWeight: 700, color: floating ? "#fff" : "var(--ink)", textShadow: floating ? "0 2px 12px rgba(0,0,0,0.5)" : "none" }}>GAMEVAULT</div>
@@ -453,17 +454,24 @@ function TopBar({ floating, currentUser, userMenu, setUserMenu, onScan, onSettin
         <button onClick={onAdd} aria-label="Add" style={{ display: "grid", placeItems: "center", width: 38, height: 38, borderRadius: 99, border: "none", cursor: "pointer", background: "var(--accent2)", color: "var(--bg)" }}><Plus size={19} strokeWidth={3} /></button>
         <div style={{ position: "relative" }}>
           <button onClick={() => setUserMenu((o: boolean) => !o)} aria-label="Account"
-            style={{ display: "grid", placeItems: "center", border: `2px solid ${currentUser.color}`, background: floating ? "rgba(20,17,26,0.4)" : currentUser.color + "22", width: 38, height: 38, borderRadius: 99, cursor: "pointer", color: floating ? "#fff" : "var(--ink)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 14 }}>
-            {currentUser.name[0].toUpperCase()}
+            style={{ display: "grid", placeItems: "center", border: `2px solid ${currentUser.color}`, background: floating ? "rgba(20,17,26,0.4)" : currentUser.color + "22", width: 38, height: 38, borderRadius: 99, cursor: "pointer", color: floating ? "#fff" : "var(--ink)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 14, padding: 0, overflow: "hidden" }}>
+            {myAvatar ? <img src={myAvatar} alt={currentUser.name} style={{ width: "100%", height: "100%", borderRadius: 99, objectFit: "cover", display: "block" }} /> : currentUser.name[0].toUpperCase()}
           </button>
           {userMenu && (
             <>
               <div onClick={() => setUserMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-              <div style={{ position: "absolute", right: 0, top: 46, zIndex: 41, minWidth: 184, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: 8, boxShadow: "0 12px 32px -10px #000" }}>
-                <div style={{ padding: "8px 10px 10px", borderBottom: "1px solid var(--line)", marginBottom: 6 }}>
-                  <div style={{ fontSize: 13, fontWeight: 800 }}>{currentUser.name}</div>
-                  <div style={{ fontSize: 10.5, color: "var(--ink-dim)", fontFamily: "var(--display)", marginTop: 2 }}>Signed in</div>
+              <div style={{ position: "absolute", right: 0, top: 46, zIndex: 41, minWidth: 196, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: 8, boxShadow: "0 12px 32px -10px #000" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px 10px", borderBottom: "1px solid var(--line)", marginBottom: 6 }}>
+                  <Avatar user={currentUser} size={32} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{currentUser.name}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--ink-dim)", fontFamily: "var(--display)", marginTop: 2 }}>Signed in</div>
+                  </div>
                 </div>
+                <button onClick={() => { setUserMenu(false); onChooseAvatar(); }}
+                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", background: "none", border: "none", cursor: "pointer", color: "var(--ink)", borderRadius: 8, fontSize: 13, textAlign: "left" }}>
+                  <ImageIcon size={15} /> Avatar &amp; colour
+                </button>
                 <form action="/api/signout" method="post">
                   <button type="submit" style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", background: "none", border: "none", cursor: "pointer", color: "var(--ink)", borderRadius: 8, fontSize: 13, textAlign: "left" }}>
                     <LogOut size={15} /> Log out
@@ -539,7 +547,7 @@ function HeroSlide({ g, hours, player, currentUser, onOpen }: { g: Game; hours: 
       <button onClick={() => onOpen(g)} style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "0 20px 54px", textAlign: "left", background: "none", border: "none", cursor: "pointer", color: "#fff", width: "100%" }}>
         {player && (
           <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 14, padding: "5px 13px 5px 5px", borderRadius: 99, background: player.color + "26", border: `1px solid ${player.color}` }}>
-            <span style={{ display: "inline-grid", placeItems: "center", width: 22, height: 22, borderRadius: 99, background: player.color, color: "#0a0612", fontFamily: "var(--display)", fontWeight: 700, fontSize: 11 }}>{player.name[0].toUpperCase()}</span>
+            <Avatar user={player} size={22} />
             <span style={{ fontSize: 12.5, fontWeight: 700, color: "#fff", fontFamily: "var(--display)" }}>{isMine ? "You're playing" : `${player.name} is playing`}</span>
           </div>
         )}

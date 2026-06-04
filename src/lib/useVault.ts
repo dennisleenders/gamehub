@@ -164,5 +164,12 @@ export function useVault(currentUserId: string) {
     await load();
   }, [supabase, currentUserId, load]);
 
-  return { games, profiles, challenges, platforms, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences, reload: load };
+  // Persist the current user's editable profile fields (avatar + colour). RLS
+  // limits the update to their own row.
+  const saveProfile = useCallback(async (fields: { avatar?: string | null; color?: string }) => {
+    await supabase.from("profiles").update(fields).eq("id", currentUserId);
+    await load();
+  }, [supabase, currentUserId, load]);
+
+  return { games, profiles, challenges, platforms, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences, saveProfile, reload: load };
 }

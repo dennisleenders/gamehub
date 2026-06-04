@@ -6,6 +6,8 @@ export interface Profile {
   id: string;
   name: string;
   color: string;
+  // Chosen avatar id (see lib/avatars). Null/absent → initial-letter fallback.
+  avatar?: string | null;
   // Per-user personal settings (not shared with the household). `overview` maps
   // a section key to its visibility; a section shows unless explicitly false.
   preferences?: { overview?: Record<string, boolean> };
@@ -85,6 +87,11 @@ export interface Game {
   // Joined client-side: { [userId]: Playthrough[] } — archived completed runs, oldest→newest.
   playthroughs?: Record<string, Playthrough[]>;
 }
+
+// The colour palette a member picks from — used everywhere their colour tints
+// the UI (avatar ring, badges, progress bars). Shared by registration + the
+// logged-in profile picker.
+export const PROFILE_COLORS = ["#6fc7b3", "#e0738a", "#e6b667", "#7fb2ff", "#c98cff", "#7fd98a"];
 
 export const DEFAULT_PLATFORMS = ["PS1", "PS2", "PS3", "PS4", "PS5", "DS", "3DS"];
 export const CONDITIONS = ["Sealed", "CIB", "Loose"];

@@ -4,8 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Joystick, Lock, UserPlus, AlertCircle } from "lucide-react";
-
-const COLORS = ["#6fc7b3", "#e0738a", "#e6b667", "#7fb2ff", "#c98cff", "#7fd98a"];
+import { AvatarGrid } from "@/components/Avatar";
+import { AVATARS } from "@/lib/avatars";
+import { PROFILE_COLORS } from "@/lib/types";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -14,7 +15,8 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
   const [name, setName] = useState("");
-  const [color, setColor] = useState(COLORS[0]);
+  const [color, setColor] = useState(PROFILE_COLORS[0]);
+  const [avatar, setAvatar] = useState(AVATARS[0].id);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -28,7 +30,7 @@ export default function LoginPage() {
         if (!name.trim()) throw new Error("Choose a name.");
         const { error } = await supabase.auth.signUp({
           email, password: pass,
-          options: { data: { name: name.trim(), color } },
+          options: { data: { name: name.trim(), color, avatar } },
         });
         if (error) throw error;
       }
@@ -73,11 +75,15 @@ export default function LoginPage() {
               <input style={{ ...inp, marginBottom: 16 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Alex" />
               <label style={lbl}>PICK A COLOUR</label>
               <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-                {COLORS.map((c) => (
+                {PROFILE_COLORS.map((c) => (
                   <button key={c} onClick={() => setColor(c)} aria-label="colour"
                     style={{ width: 30, height: 30, borderRadius: 99, background: c, cursor: "pointer",
                       border: color === c ? "3px solid var(--ink)" : "3px solid transparent" }} />
                 ))}
+              </div>
+              <label style={lbl}>PICK AN AVATAR</label>
+              <div style={{ marginBottom: 16 }}>
+                <AvatarGrid value={avatar} color={color} onSelect={setAvatar} />
               </div>
             </>
           )}
