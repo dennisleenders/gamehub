@@ -13,7 +13,8 @@ export function useVault(currentUserId: string) {
   const [games, setGames] = useState<Game[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [platforms, setPlatforms] = useState<string[]>(DEFAULT_PLATFORMS);
-  const [genres, setGenres] = useState<string[]>(DEFAULT_GENRES);
+  // Genres are a fixed, app-defined list — not user-editable.
+  const genres = DEFAULT_GENRES;
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -43,7 +44,6 @@ export function useVault(currentUserId: string) {
     const byKey: Record<string, any> = {};
     (settings ?? []).forEach((s: any) => { byKey[s.key] = s.value; });
     setPlatforms(Array.isArray(byKey.platforms) && byKey.platforms.length ? byKey.platforms : DEFAULT_PLATFORMS);
-    setGenres(Array.isArray(byKey.genres) && byKey.genres.length ? byKey.genres : DEFAULT_GENRES);
     setLoading(false);
   }, [supabase]);
 
@@ -108,8 +108,8 @@ export function useVault(currentUserId: string) {
     await load();
   }, [supabase, load]);
 
-  // Persist an editable list (platforms/genres) to the shared settings store.
-  const saveSettings = useCallback(async (key: "platforms" | "genres", value: string[]) => {
+  // Persist the editable platforms list to the shared settings store.
+  const saveSettings = useCallback(async (key: "platforms", value: string[]) => {
     await supabase.from("app_settings").upsert({ key, value });
     await load();
   }, [supabase, load]);

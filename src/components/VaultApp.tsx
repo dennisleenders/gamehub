@@ -235,7 +235,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
           onDelete={async (id) => { await deleteGame(id); setEditing(null); setDetail(null); }} />
       )}
       {settingsOpen && (
-        <SettingsModal games={games} platforms={platforms} genres={genres}
+        <SettingsModal games={games} platforms={platforms}
           onSave={saveSettings} onClose={() => setSettingsOpen(false)} />
       )}
       {scanOpen && (
@@ -724,9 +724,9 @@ function GameModal({ game, currentUser, platforms, genres, onSave, onDelete, onC
   );
 }
 
-function SettingsModal({ games, platforms, genres, onSave, onClose }: {
-  games: Game[]; platforms: string[]; genres: string[];
-  onSave: (key: "platforms" | "genres", value: string[]) => void; onClose: () => void;
+function SettingsModal({ games, platforms, onSave, onClose }: {
+  games: Game[]; platforms: string[];
+  onSave: (key: "platforms", value: string[]) => void; onClose: () => void;
 }) {
   const lbl: React.CSSProperties = { fontSize: 10, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, marginBottom: 8, display: "block" };
   const inp: React.CSSProperties = { flex: 1, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", color: "var(--ink)", padding: "10px 12px", fontSize: 14, fontFamily: "var(--body)", outline: "none", boxSizing: "border-box" };
@@ -735,7 +735,7 @@ function SettingsModal({ games, platforms, genres, onSave, onClose }: {
   // still attached to games can't be removed — that would orphan the value in
   // the dropdowns and stats.
   const EditableList = ({ title, icon: Ic, items, field, usedCount }: {
-    title: string; icon: any; items: string[]; field: "platforms" | "genres"; usedCount: (v: string) => number;
+    title: string; icon: any; items: string[]; field: "platforms"; usedCount: (v: string) => number;
   }) => {
     const [draft, setDraft] = useState("");
     const add = () => {
@@ -756,7 +756,7 @@ function SettingsModal({ games, platforms, genres, onSave, onClose }: {
                 {v}
                 {n > 0 && <span style={{ fontSize: 10, color: "var(--ink-dim)" }}>{n}</span>}
                 <button onClick={() => remove(v)} disabled={n > 0} title={n > 0 ? `In use by ${n} game${n === 1 ? "" : "s"}` : "Remove"}
-                  style={{ display: "grid", placeItems: "center", width: 19, height: 19, borderRadius: 99, border: "none", cursor: n > 0 ? "not-allowed" : "pointer", background: n > 0 ? "transparent" : "var(--panel-alt)", color: n > 0 ? "var(--ink-dim)" : "var(--ink)", opacity: n > 0 ? 0.4 : 1 }}>
+                  style={{ display: "grid", placeItems: "center", width: 19, height: 19, padding: 0, lineHeight: 0, borderRadius: 99, border: "none", cursor: n > 0 ? "not-allowed" : "pointer", background: n > 0 ? "transparent" : "var(--panel-alt)", color: n > 0 ? "var(--ink-dim)" : "var(--ink)", opacity: n > 0 ? 0.4 : 1 }}>
                   <X size={12} />
                 </button>
               </span>
@@ -782,10 +782,9 @@ function SettingsModal({ games, platforms, genres, onSave, onClose }: {
           <button onClick={onClose} style={{ display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><X size={16} /></button>
         </div>
         <div style={{ fontSize: 12.5, color: "var(--ink-dim)", lineHeight: 1.5, marginBottom: 20 }}>
-          Curate the dropdown lists shared across your household. Changes save instantly.
+          Curate the platforms shared across your household. Changes save instantly.
         </div>
         <EditableList title="Platforms" icon={Gamepad2} items={platforms} field="platforms" usedCount={(v) => games.filter((g) => g.platform === v).length} />
-        <EditableList title="Genres" icon={Library} items={genres} field="genres" usedCount={(v) => games.filter((g) => g.genre === v).length} />
       </div>
     </div>
   );
