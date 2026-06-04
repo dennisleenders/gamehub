@@ -59,10 +59,18 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   const myFinished = owned.filter((g) => getProg(g, uid).status === "finished").length;
   const myBacklog = owned.filter((g) => getProg(g, uid).status === "backlog").length;
 
+  // Games the current user has actually played (playing/finished), most recently touched first.
+  const recentlyPlayed = owned
+    .map((g) => ({ g, p: g.progress?.[uid] }))
+    .filter((x) => x.p && x.p.status !== "backlog" && x.p.updated_at)
+    .sort((a, b) => (b.p!.updated_at! < a.p!.updated_at! ? -1 : 1))
+    .map((x) => ({ g: x.g, p: x.p! }));
+
   const byPlatform = platforms.map((p) => ({ p, count: owned.filter((g) => g.platform === p).length }))
     .filter((x) => x.count).sort((a, b) => b.count - a.count);
   const maxCount = Math.max(1, ...byPlatform.map((x) => x.count));
   const recent = [...games];
+  const mostValued = [...owned].filter((g) => (g.value_cents || 0) > 0).sort((a, b) => (b.value_cents || 0) - (a.value_cents || 0));
 
   // The open detail sheet tracks live data so edits/replays reflect immediately
   // (detail only remembers WHICH game is open; the data comes from `games`).
@@ -143,6 +151,40 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
                   ))}
                 </div>
               </section>
+
+              {recentlyPlayed.length > 0 && (
+                <section>
+                  <SectionHead icon={Joystick} accent="var(--accent2)">RECENTLY PLAYED</SectionHead>
+                  <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }} className="hide-scroll">
+                    {recentlyPlayed.slice(0, 8).map(({ g, p }) => (
+                      <button key={g.id} onClick={() => setDetail(g)} className="shelf-item" style={{ flex: "0 0 auto", width: 122, color: "var(--ink)" }}>
+                        <Cover g={g} ratio={1.32} profiles={profiles} />
+                        <div style={{ fontSize: 12.5, fontWeight: 700, marginTop: 8, lineHeight: 1.2, height: "2.4em", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{g.title}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: playColor(p.status), fontFamily: "var(--display)", marginTop: 3 }}>
+                          {p.status === "playing" && <span className="pulse" style={{ width: 6, height: 6, borderRadius: 99, background: "var(--accent2)" }} />}
+                          {p.status === "finished" && <Check size={11} strokeWidth={3} />}
+                          {p.hours}h played
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {mostValued.length > 0 && (
+                <section>
+                  <SectionHead icon={Trophy} accent="var(--accent3)">MOST VALUED</SectionHead>
+                  <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }} className="hide-scroll">
+                    {mostValued.slice(0, 8).map((g) => (
+                      <button key={g.id} onClick={() => setDetail(g)} className="shelf-item" style={{ flex: "0 0 auto", width: 122, color: "var(--ink)" }}>
+                        <Cover g={g} ratio={1.32} profiles={profiles} />
+                        <div style={{ fontSize: 12.5, fontWeight: 700, marginTop: 8, lineHeight: 1.2, height: "2.4em", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{g.title}</div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--accent3)", fontFamily: "var(--display)", marginTop: 3 }}>{money(g.value_cents)}</div>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               <section>
                 <SectionHead icon={Gamepad2} accent="var(--accent2)">BY SYSTEM</SectionHead>
@@ -747,7 +789,7 @@ function SettingsModal({ games, platforms, onSave, onClose }: {
     const remove = (v: string) => onSave(field, items.filter((i) => i !== v));
     return (
       <div style={{ marginBottom: 22 }}>
-        <label style={lbl}><Ic size={12} style={{ verticalAlign: "-2px", marginRight: 6 }} />{title}</label>
+        <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 6 }}><Ic size={12} />{title}</label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
           {items.map((v) => {
             const n = usedCount(v);
