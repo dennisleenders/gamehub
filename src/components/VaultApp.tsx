@@ -454,8 +454,10 @@ function TopBar({ floating, currentUser, userMenu, setUserMenu, onScan, onSettin
         <button onClick={onAdd} aria-label="Add" style={{ display: "grid", placeItems: "center", width: 38, height: 38, borderRadius: 99, border: "none", cursor: "pointer", background: "var(--accent2)", color: "var(--bg)" }}><Plus size={19} strokeWidth={3} /></button>
         <div style={{ position: "relative" }}>
           <button onClick={() => setUserMenu((o: boolean) => !o)} aria-label="Account"
-            style={{ display: "grid", placeItems: "center", border: `2px solid ${currentUser.color}`, background: floating ? "rgba(20,17,26,0.4)" : currentUser.color + "22", width: 38, height: 38, borderRadius: 99, cursor: "pointer", color: floating ? "#fff" : "var(--ink)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 14, padding: 0, overflow: "hidden" }}>
-            {myAvatar ? <img src={myAvatar} alt={currentUser.name} style={{ width: "100%", height: "100%", borderRadius: 99, objectFit: "cover", display: "block" }} /> : currentUser.name[0].toUpperCase()}
+            style={myAvatar
+              ? { display: "grid", placeItems: "center", width: 38, height: 38, borderRadius: 99, cursor: "pointer", border: "none", background: "none", padding: 0 }
+              : { display: "grid", placeItems: "center", border: `2px solid ${currentUser.color}`, background: floating ? "rgba(20,17,26,0.4)" : currentUser.color + "22", width: 38, height: 38, borderRadius: 99, cursor: "pointer", color: floating ? "#fff" : "var(--ink)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 14 }}>
+            {myAvatar ? <Avatar user={currentUser} size={38} /> : currentUser.name[0].toUpperCase()}
           </button>
           {userMenu && (
             <>

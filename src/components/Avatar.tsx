@@ -37,10 +37,11 @@ export function AvatarGrid({ value, color, onSelect }: { value?: string | null; 
         const on = a.id === value;
         return (
           <button key={a.id} type="button" onClick={() => onSelect(a.id)} aria-label={`Avatar ${a.id}`}
-            style={{ position: "relative", width: 62, height: 62, padding: 0, borderRadius: 99, cursor: "pointer", background: "var(--bg)", border: `2px solid ${on ? color : "var(--line)"}` }}>
-            <img src={a.src} alt="" style={{ width: "100%", height: "100%", borderRadius: 99, objectFit: "cover", display: "block" }} />
+            style={{ position: "relative", width: 62, height: 62, padding: 0, borderRadius: 99, cursor: "pointer", border: "none", background: "none", lineHeight: 0 }}>
+            {/* Border lives on the image (single element) so there's no seam ring. */}
+            <img src={a.src} alt="" style={{ width: "100%", height: "100%", borderRadius: 99, objectFit: "cover", display: "block", border: `2px solid ${on ? color : "var(--line)"}` }} />
             {on && (
-              <span style={{ position: "absolute", bottom: -3, right: -3, display: "grid", placeItems: "center", width: 22, height: 22, borderRadius: 99, background: color, border: "2px solid var(--bg)" }}>
+              <span style={{ position: "absolute", bottom: -3, right: -3, display: "grid", placeItems: "center", width: 22, height: 22, borderRadius: 99, background: color, border: "2px solid var(--panel)" }}>
                 <Check size={12} strokeWidth={3} color="var(--bg)" />
               </span>
             )}
