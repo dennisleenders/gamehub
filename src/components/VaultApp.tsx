@@ -414,7 +414,7 @@ function TopBar({ floating, currentUser, userMenu, setUserMenu, onScan, onSettin
     : { background: "var(--panel)", border: "1px solid var(--line)" };
   const iconBtn: React.CSSProperties = { display: "grid", placeItems: "center", width: 38, height: 38, borderRadius: 99, cursor: "pointer", color: floating ? "#fff" : "var(--ink)", ...glass };
   return (
-    <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: floating ? "16px 16px 14px" : "20px 0 16px", position: "relative" }}>
+    <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: floating ? "16px 16px 14px" : "16px 0", position: "relative" }}>
       <div style={{ fontFamily: "var(--display)", fontSize: 19, letterSpacing: 1.5, fontWeight: 700, color: floating ? "#fff" : "var(--ink)", textShadow: floating ? "0 2px 12px rgba(0,0,0,0.5)" : "none" }}>GAMEVAULT</div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <button onClick={onScan} aria-label="Scan" style={iconBtn}><ScanLine size={18} /></button>
