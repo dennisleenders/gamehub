@@ -113,7 +113,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
             <ImmersiveHero slides={playingSlides} userById={userById} currentUser={currentUser} onOpen={setDetail} />
             <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 20 }}>{topbar(true)}</div>
           </div>
-          <div style={{ position: "relative", maxWidth: 940, margin: "0 auto", padding: "24px 16px 110px" }}>
+          <div style={{ position: "relative", maxWidth: 940, margin: "-1px auto 0", background: "var(--bg)", padding: "24px 16px 110px" }}>
             <div className="fade home-col" style={{ display: "flex", flexDirection: "column", gap: 26 }}>
               <section>
                 <div style={{ fontSize: 11, letterSpacing: 2, color: "var(--ink-dim)", fontFamily: "var(--display)", marginBottom: 14 }}>YOUR COLLECTION</div>
@@ -423,7 +423,7 @@ function HeroSlide({ g, hours, player, currentUser, onOpen }: { g: Game; hours: 
       <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
         {showArt ? <img src={g.cover!} alt={g.title} onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontFamily: "var(--display)", fontSize: 96, color: tint, opacity: .5 }}>{(g.title || "?")[0]}</span>}
       </div>
-      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "linear-gradient(to top, rgba(8,6,12,0.96) 0%, rgba(8,6,12,0.72) 22%, rgba(8,6,12,0.12) 48%, rgba(8,6,12,0.28) 100%)" }} />
+      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "linear-gradient(to top, #13111a 0%, rgba(19,17,26,0.82) 34%, rgba(19,17,26,0.12) 64%, rgba(19,17,26,0.28) 100%)" }} />
       <div style={{ position: "absolute", top: 86, left: 20, display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 12px 6px 9px", borderRadius: 99, background: "rgba(20,17,26,0.4)", backdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,0.14)" }}>
         <span className="pulse" style={{ width: 7, height: 7, borderRadius: 99, background: "var(--accent2)" }} />
         <span style={{ fontSize: 10.5, letterSpacing: 1.5, color: "#fff", fontFamily: "var(--display)", fontWeight: 700 }}>NOW PLAYING</span>
