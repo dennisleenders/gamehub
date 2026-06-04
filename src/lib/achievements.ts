@@ -29,6 +29,20 @@ export const TIER_POINTS: Record<Tier, number> = {
   platinum: 100,
 };
 
+// Shared tier presentation, used by the achievement grid and the milestone toasts.
+export const TIER_COLOR: Record<Tier, string> = {
+  bronze: "var(--accent3)",
+  silver: "var(--ink-dim)",
+  gold: "var(--accent)",
+  platinum: "var(--accent2)",
+};
+export const TIER_LABEL: Record<Tier, string> = {
+  bronze: "BRONZE",
+  silver: "SILVER",
+  gold: "GOLD",
+  platinum: "PLATINUM",
+};
+
 export interface UserStats {
   completions: number;          // total finishes, replays included
   distinctGamesFinished: number; // games finished at least once

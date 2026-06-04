@@ -8,16 +8,8 @@ import type { Challenge, ChallengeType, Game, Profile } from "@/lib/types";
 import { fmtDate } from "@/lib/types";
 import {
   ACHIEVEMENTS, computeStatsByUser, computeRanking, challengeStandings, challengePhase,
-  evaluateAchievement, TOTAL_TIERS, type Tier, type UserStats, type AchievementDef,
+  evaluateAchievement, TOTAL_TIERS, TIER_COLOR, TIER_LABEL, type UserStats, type AchievementDef,
 } from "@/lib/achievements";
-
-const TIER_COLOR: Record<Tier, string> = {
-  bronze: "var(--accent3)",
-  silver: "var(--ink-dim)",
-  gold: "var(--accent)",
-  platinum: "var(--accent2)",
-};
-const TIER_LABEL: Record<Tier, string> = { bronze: "BRONZE", silver: "SILVER", gold: "GOLD", platinum: "PLATINUM" };
 
 const CHALLENGE_TYPES: [ChallengeType, string][] = [["complete_games", "Complete games"]];
 

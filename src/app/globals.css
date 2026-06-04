@@ -31,6 +31,12 @@ input::placeholder, textarea::placeholder { color: #ffffff44; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .pulse { animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(.85); } }
+/* Toast notifications: slide in from above, slide back up on dismiss. */
+.toast { animation-fill-mode: both; }
+.toast-in { animation: toastIn .34s cubic-bezier(.2,.8,.2,1); }
+.toast-out { animation: toastOut .24s ease forwards; }
+@keyframes toastIn { from { transform: translateY(-120%); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes toastOut { from { transform: none; opacity: 1; } to { transform: translateY(-120%); opacity: 0; } }
 
 .home-col { min-width: 0; }
 .home-col > section { min-width: 0; max-width: 100%; }

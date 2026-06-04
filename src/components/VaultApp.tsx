@@ -10,6 +10,7 @@ import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser"
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { useVault } from "@/lib/useVault";
 import AchievementsView, { CreateChallengeModal, RankingBoard } from "@/components/AchievementsView";
+import { useAchievementToasts } from "@/components/useAchievementToasts";
 import {
   type Game, type Profile, type PlayStatus, PLAY_STATUS, PLATFORM_TINT,
   CONDITIONS, REGIONS, OVERVIEW_SECTIONS, money, fmtDate,
@@ -62,6 +63,10 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   // Switching views (via the bottom nav or a dashboard shortcut) should always
   // land you at the top of the new page rather than keeping the old scroll.
   useEffect(() => { window.scrollTo(0, 0); }, [view]);
+
+  // Pop a toast whenever you cross an achievement tier. Gated on !loading so the
+  // baseline is taken from fully-loaded data (no notification spam on first load).
+  useAchievementToasts(games, profiles, uid, !loading);
 
   const resolveUpc = async (upc: string): Promise<{ title: string | null; error?: string; price?: PricePayload | null; pricecharting_id?: string | null }> => {
     const r = await fetch("/api/upc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ upc }) });
