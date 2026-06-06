@@ -1,6 +1,6 @@
 // Shared domain types + UI constants for GameVault.
 
-export type PlayStatus = "backlog" | "playing" | "finished";
+export type PlayStatus = "backlog" | "playing" | "finished" | "abandoned";
 
 export interface Profile {
   id: string;
@@ -102,6 +102,7 @@ export const PLAY_STATUS: Record<PlayStatus, { label: string; short: string }> =
   backlog: { label: "Backlog", short: "BACKLOG" },
   playing: { label: "Playing", short: "PLAYING" },
   finished: { label: "Finished", short: "FINISHED" },
+  abandoned: { label: "Abandoned", short: "ABANDONED" },
 };
 
 export const PLATFORM_TINT: Record<string, string> = {

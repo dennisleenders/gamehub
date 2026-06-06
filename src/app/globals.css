@@ -45,6 +45,12 @@ input::placeholder, textarea::placeholder { color: #ffffff44; }
 .hero-track::-webkit-scrollbar { display: none; }
 .hero-track img { -webkit-user-drag: none; user-drag: none; pointer-events: none; }
 .hero-slide { position: relative; flex: 0 0 100%; width: 100%; height: 100%; scroll-snap-align: start; overflow: hidden; }
+.shot-track { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none; user-select: none; -webkit-user-select: none; }
+.shot-track::-webkit-scrollbar { display: none; }
+.shot-track img { -webkit-user-drag: none; user-drag: none; pointer-events: none; }
+/* ~2.5 shots per view (40% basis) with a peek of the next; gap lives on the track. */
+.shot-slide { flex: 0 0 40%; scroll-snap-align: start; }
 .hide-scroll { max-width: 100%; -webkit-overflow-scrolling: touch; }
 .hide-scroll::-webkit-scrollbar { height: 6px; }
 .hide-scroll::-webkit-scrollbar-thumb { background: #ffffff22; border-radius: 9px; }

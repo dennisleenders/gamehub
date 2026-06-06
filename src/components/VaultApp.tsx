@@ -9,6 +9,7 @@ import {
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { useVault } from "@/lib/useVault";
+import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 import AchievementsView, { CreateChallengeModal, RankingBoard } from "@/components/AchievementsView";
 import { useAchievementToasts } from "@/components/useAchievementToasts";
 import { Avatar, AvatarPickerModal } from "@/components/Avatar";
@@ -21,7 +22,7 @@ import {
 const FALLBACK_TINTS = ["#9b8cff", "#6fc7b3", "#e6b667", "#e0738a", "#7fb2ff", "#c98cff"];
 const hashIdx = (s = "", n = 1) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 9973; return h % n; };
 const tintFor = (p: string) => PLATFORM_TINT[p] || FALLBACK_TINTS[hashIdx(p, FALLBACK_TINTS.length)];
-const playColor = (k: string) => k === "playing" ? "var(--accent2)" : k === "finished" ? "var(--good)" : "var(--ink-dim)";
+const playColor = (k: string) => k === "playing" ? "var(--accent2)" : k === "finished" ? "var(--good)" : k === "abandoned" ? "var(--bad)" : "var(--ink-dim)";
 const getProg = (g: Game, uid?: string) => (uid && g.progress?.[uid]) || { status: "backlog" as PlayStatus, hours: 0 };
 
 // PriceCharting returns loose/CIB/new prices; pick the tier matching the game's
@@ -43,6 +44,7 @@ type GameSeed = Partial<Game> & { upc?: string | null; priceTiers?: PriceTiers |
 const progressEntries = (g: Game) => Object.entries(g.progress || {});
 const playersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status === "playing");
 const finishersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status === "finished");
+const abandonersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status === "abandoned");
 
 export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   const uid = currentUser.id;
@@ -210,6 +212,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
                         <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: playColor(p.status), fontFamily: "var(--display)", marginTop: 3 }}>
                           {p.status === "playing" && <span className="pulse" style={{ width: 6, height: 6, borderRadius: 99, background: "var(--accent2)" }} />}
                           {p.status === "finished" && <Check size={11} strokeWidth={3} />}
+                          {p.status === "abandoned" && <X size={11} strokeWidth={3} />}
                           {p.hours}h played
                         </div>
                       </button>
@@ -277,7 +280,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
             <div className="filter-grid">
               <FilterField label="Library" value={status} onChange={setStatus} options={[["all", "All games"], ["owned", "Owned"], ["wishlist", "Wishlist"]]} />
               <FilterField label="Player" value={playerFilter} onChange={setPlayerFilter} options={[["all", "Any player"], ...profiles.map((a) => [a.id, a.name] as [string, string])]} />
-              <FilterField label="Played" value={playFilter} onChange={setPlayFilter} options={[["all", "Any status"], ["playing", "Playing"], ["finished", "Finished"], ["backlog", "Backlog"]]} />
+              <FilterField label="Played" value={playFilter} onChange={setPlayFilter} options={[["all", "Any status"], ["playing", "Playing"], ["finished", "Finished"], ["backlog", "Backlog"], ["abandoned", "Abandoned"]]} />
               <FilterField label="System" value={platform} onChange={setPlatform} options={[["all", "All systems"], ...platforms.map((p) => [p, p] as [string, string])]} />
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "14px 2px 16px", gap: 12 }}>
@@ -392,15 +395,17 @@ function Cover({ g, ratio = 1.32, profiles }: { g: Game; ratio?: number; profile
   const showArt = g.cover && !err;
   const finishers = finishersOf(g).map(([id]) => profiles.find((a) => a.id === id)).filter(Boolean) as Profile[];
   const players = playersOf(g).map(([id]) => profiles.find((a) => a.id === id)).filter(Boolean) as Profile[];
+  const abandoners = abandonersOf(g).map(([id]) => profiles.find((a) => a.id === id)).filter(Boolean) as Profile[];
   return (
     <div style={{ width: "100%", aspectRatio: `1 / ${ratio}`, borderRadius: "var(--radius)", position: "relative", overflow: "hidden", border: "1px solid var(--line)", background: `linear-gradient(150deg, ${tint}33, var(--panel-alt))` }}>
       {showArt ? <img src={g.cover!} alt={g.title} onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         : <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}><span style={{ fontFamily: "var(--display)", fontSize: 30, color: tint, opacity: .5 }}>{(g.title || "?")[0]}</span></div>}
       {g.status === "wishlist" && <div style={{ position: "absolute", top: 7, right: 7, display: "grid", placeItems: "center", width: 22, height: 22, borderRadius: 99, background: "#13111ad0" }}><Heart size={12} color="var(--accent)" fill="var(--accent)" /></div>}
-      {g.status === "owned" && (players.length > 0 || finishers.length > 0) && (
+      {g.status === "owned" && (players.length > 0 || finishers.length > 0 || abandoners.length > 0) && (
         <div style={{ position: "absolute", top: 7, right: 7, display: "flex", gap: 4 }}>
           {players.map((u) => <span key={"p" + u.id} title={`${u.name} playing`} style={{ display: "grid", placeItems: "center", width: 19, height: 19, borderRadius: 99, background: "#13111aea", border: `1.5px solid ${u.color}` }}><span className="pulse" style={{ width: 7, height: 7, borderRadius: 99, background: u.color }} /></span>)}
           {finishers.map((u) => <span key={"f" + u.id} title={`${u.name} finished`} style={{ display: "grid", placeItems: "center", width: 19, height: 19, borderRadius: 99, background: u.color, border: "1.5px solid var(--bg)" }}><Check size={11} color="var(--bg)" strokeWidth={3.5} /></span>)}
+          {abandoners.map((u) => <span key={"a" + u.id} title={`${u.name} abandoned`} style={{ display: "grid", placeItems: "center", width: 19, height: 19, borderRadius: 99, background: "#13111aea", border: "1.5px solid var(--bad)" }}><X size={11} color="var(--bad)" strokeWidth={3.5} /></span>)}
         </div>
       )}
     </div>
@@ -571,19 +576,99 @@ function HeroSlide({ g, hours, player, currentUser, onOpen }: { g: Game; hours: 
   );
 }
 
+// IGDB screenshots (t_screenshot_big, 16:9) shown in the detail view as a swipeable
+// slider. Each image drops out on its own load error so a stale URL never leaves a
+// broken tile. Mirrors the hero slider: scroll-snap track, dots, mouse-drag.
+function Screenshots({ shots }: { shots?: string[] | null }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [idx, setIdx] = useState(0);
+  // Number of reachable snap positions (dots). With ~2.5 shots per view the last
+  // image can't left-align (the viewport clamps the scroll first), so this is
+  // fewer than the image count — measured from the actual layout below.
+  const [pages, setPages] = useState(1);
+  const [broken, setBroken] = useState<Record<number, boolean>>({});
+  // The screenshot opened full-size in the lightbox, or null when closed.
+  const [zoom, setZoom] = useState<string | null>(null);
+  const drag = useRef({ active: false, startX: 0, startScroll: 0, moved: false });
+
+  const all = (shots ?? []).filter((s) => typeof s === "string" && s.trim());
+  // Keep stable indices for onError tracking, but only render the live ones.
+  const list = all.map((src, i) => ({ src, i })).filter(({ i }) => !broken[i]);
+
+  // Snap step is one image's width + the inter-image gap (measured from the first
+  // two slides), not the viewport — we show ~2.5 shots per view.
+  const stepPx = () => { const el = trackRef.current; if (!el) return 1; const c = el.children; if (c.length >= 2) return (c[1] as HTMLElement).offsetLeft - (c[0] as HTMLElement).offsetLeft; return (c[0] as HTMLElement)?.clientWidth || el.clientWidth; };
+  // Reachable positions = the clamped end scroll mapped to a step count, +1. So the
+  // last dot corresponds to "scrolled to the end" even though the final image never
+  // reaches the left edge. Recomputed on mount, resize, and when the list changes.
+  const recompute = () => { const el = trackRef.current; if (!el) return; const max = el.scrollWidth - el.clientWidth; const p = max <= 1 ? 1 : Math.round(max / stepPx()) + 1; setPages(p); setIdx((i) => Math.min(i, p - 1)); };
+  const clamp = (el: HTMLDivElement) => Math.max(0, Math.min(pages - 1, Math.round(el.scrollLeft / stepPx())));
+  const onScroll = () => { const el = trackRef.current; if (el) { const i = clamp(el); if (i !== idx) setIdx(i); } };
+  const goTo = (i: number) => trackRef.current?.scrollTo({ left: i * stepPx(), behavior: "smooth" });
+  const onPointerDown = (e: React.PointerEvent) => { if (e.pointerType !== "mouse") return; const el = trackRef.current; if (!el) return; drag.current = { active: true, startX: e.clientX, startScroll: el.scrollLeft, moved: false }; el.setPointerCapture?.(e.pointerId); };
+  const onPointerMove = (e: React.PointerEvent) => { if (!drag.current.active) return; const el = trackRef.current; if (!el) return; if (Math.abs(e.clientX - drag.current.startX) > 4) drag.current.moved = true; el.scrollLeft = drag.current.startScroll - (e.clientX - drag.current.startX); };
+  const endDrag = () => { if (!drag.current.active) return; const el = trackRef.current; drag.current.active = false; if (el) goTo(clamp(el)); };
+  // A mouse-drag to scroll also fires a click; only open the lightbox on a clean
+  // tap/click. IGDB serves bigger renders by swapping the size token in the URL.
+  const open = (src: string) => { if (!drag.current.moved) setZoom(src.replace("t_screenshot_big", "t_1080p")); };
+
+  useEffect(() => {
+    recompute();
+    const el = trackRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(recompute);
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list.length]);
+
+  if (!list.length) return null;
+  return (
+    <div style={{ marginTop: 20 }}>
+      <div style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", marginBottom: 8 }}>SCREENSHOTS</div>
+      <div ref={trackRef} onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag}
+        className="shot-track" style={{ cursor: pages > 1 ? "grab" : "default" }}>
+        {list.map(({ src, i }) => (
+          <div key={i} className="shot-slide" onClick={() => open(src)} style={{ cursor: "zoom-in" }}>
+            <img src={src} alt="" loading="lazy" onLoad={recompute} onError={() => setBroken((b) => ({ ...b, [i]: true }))}
+              style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", display: "block", borderRadius: "var(--radius)", border: "1px solid var(--line)" }} />
+          </div>
+        ))}
+      </div>
+      {pages > 1 && (
+        <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 10 }}>
+          {Array.from({ length: pages }, (_, i) => { const on = i === idx; return <button key={i} onClick={() => goTo(i)} aria-label={`Screenshot ${i + 1}`} style={{ width: on ? 22 : 8, height: 8, borderRadius: 99, border: "none", cursor: "pointer", padding: 0, background: on ? "var(--accent)" : "var(--line)", transition: "all .3s" }} />; })}
+        </div>
+      )}
+      {zoom && (
+        <div onClick={() => setZoom(null)} className="fade" style={{ position: "fixed", inset: 0, zIndex: 90, background: "#000c", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 640, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 20, padding: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, padding: "2px 4px" }}>
+              <div style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>SCREENSHOT</div>
+              <button onClick={() => setZoom(null)} aria-label="Close" style={{ display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><X size={16} /></button>
+            </div>
+            <img src={zoom} alt="" style={{ width: "100%", maxHeight: "78vh", objectFit: "contain", display: "block", borderRadius: "var(--radius)" }} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DetailView({ game, userById, onClose, onEdit }: { game: Game; userById: (id?: string | null) => Profile | null; onClose: () => void; onEdit: () => void }) {
+  useBodyScrollLock();
   const g = game;
   const tint = tintFor(g.platform);
   const addedByUser = userById(g.added_by);
   const facts: [string, any][] = [["Developer", g.developer || "—"], ["Publisher", g.publisher || "—"], ["Released", g.year || "—"], ["Genre", g.genre || "—"], ["Condition", g.condition || "—"], ["Region", g.region || "—"]];
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", zIndex: 60, display: "flex", alignItems: "flex-end", justifyContent: "center" }} className="fade">
-      <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "94vh", overflowY: "auto", overflowX: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
-        <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", background: "var(--panel)", borderBottom: "1px solid var(--line)" }}>
+      <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "94vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
+        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", background: "var(--panel)", borderBottom: "1px solid var(--line)" }}>
           <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)", fontFamily: "var(--display)", fontSize: 12, fontWeight: 700 }}><ChevronLeft size={17} /> BACK</button>
           <button onClick={onEdit} style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--accent2)", color: "var(--bg)", border: "none", fontFamily: "var(--display)", fontWeight: 700, fontSize: 12, padding: "8px 14px", borderRadius: "var(--radius)", cursor: "pointer" }}><Pencil size={14} /> EDIT</button>
         </div>
-        <div style={{ padding: 20 }}>
+        <div style={{ padding: 20, overflowY: "auto", overflowX: "hidden", flex: 1, minHeight: 0 }}>
           <div style={{ display: "flex", gap: 18 }}>
             <div style={{ width: 130, flexShrink: 0 }}><Cover g={g} ratio={1.33} profiles={[]} /></div>
             <div style={{ minWidth: 0, flex: 1 }}>
@@ -598,6 +683,8 @@ function DetailView({ game, userById, onClose, onEdit }: { game: Game; userById:
           </div>
 
           {g.description && <div style={{ marginTop: 20 }}><div style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", marginBottom: 7 }}>ABOUT</div><p style={{ fontSize: 14.5, lineHeight: 1.6, margin: 0 }}>{g.description}</p></div>}
+
+          <Screenshots shots={g.screenshots} />
 
           {g.status === "owned" && (
             <div style={{ marginTop: 20 }}>
@@ -624,6 +711,7 @@ function DetailView({ game, userById, onClose, onEdit }: { game: Game; userById:
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, fontFamily: "var(--display)", color: playColor(p.status) }}>
                             {p.status === "playing" && <span className="pulse" style={{ width: 7, height: 7, borderRadius: 99, background: "var(--accent2)" }} />}
                             {p.status === "finished" && <Check size={13} strokeWidth={3} />}
+                            {p.status === "abandoned" && <X size={13} strokeWidth={3} />}
                             {PLAY_STATUS[p.status].short}
                           </span>
                           <span style={{ fontFamily: "var(--display)", fontSize: 13, marginLeft: 4 }}>{p.hours}h</span>
@@ -719,6 +807,7 @@ function StarRating({ value, onChange, size = 26 }: { value: number | null; onCh
 }
 
 function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave, onDelete, onClose }: { game: GameSeed; currentUser: Profile; platforms: string[]; genres: string[]; priceEnabled: boolean; onSave: (g: any) => void; onDelete: (id: string) => void; onClose: () => void }) {
+  useBodyScrollLock();
   const isNew = !game.id;
   const myProg = getProg(game as Game, currentUser.id);
   // A scan can seed price tiers; derive the initial value from the tier matching
@@ -857,8 +946,11 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
         {f.status === "owned" && (
           <div style={{ marginBottom: 14 }}>
             <label style={lbl}>YOUR PLAY STATUS · {currentUser.name}{completions > 0 && <span style={{ color: "var(--good)" }}> · COMPLETED {completions}×</span>}</label>
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              {Object.entries(PLAY_STATUS).map(([k, v]) => { const on = f.myStatus === k; return <button key={k} onClick={() => pickStatus(k)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 0", border: `1px solid ${on ? playColor(k) : "var(--line)"}`, borderRadius: "var(--radius)", cursor: "pointer", background: on ? playColor(k) + "22" : "var(--bg)", color: on ? "var(--ink)" : "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 11 }}>{k === "finished" && <Check size={13} strokeWidth={3} />}{v.short}</button>; })}
+            <div style={{ position: "relative", marginBottom: 12 }}>
+              <select value={f.myStatus} onChange={(e) => pickStatus(e.target.value)} style={{ ...inp, cursor: "pointer", appearance: "none", WebkitAppearance: "none", MozAppearance: "none", paddingRight: 34, fontFamily: "var(--display)", fontWeight: 700, color: playColor(f.myStatus), borderColor: playColor(f.myStatus) }}>
+                {Object.entries(PLAY_STATUS).map(([k, v]) => <option key={k} value={k} style={{ color: "var(--ink)", background: "var(--panel)" }}>{v.label}</option>)}
+              </select>
+              <ChevronDown size={16} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--ink-dim)" }} />
             </div>
             {startingReplay && (
               <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12, padding: "9px 11px", borderRadius: "var(--radius)", background: "var(--accent2)1a", border: "1px solid var(--accent2)", fontSize: 11.5, color: "var(--ink)", lineHeight: 1.4 }}>
@@ -918,6 +1010,7 @@ function SettingsModal({ games, platforms, preferences, priceEnabled, priceToken
   onSavePreferences: (preferences: Profile["preferences"]) => void;
   onClose: () => void;
 }) {
+  useBodyScrollLock();
   // Write-only token field: we never receive the saved token, only whether one
   // exists, so the input starts empty and "paste to replace" rather than showing it.
   const [tokenDraft, setTokenDraft] = useState("");
@@ -1066,6 +1159,7 @@ function ScannerModal({ resolve, onResolved, onClose }: {
   onResolved: (res: ScanResult) => void;
   onClose: () => void;
 }) {
+  useBodyScrollLock();
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
   const handledRef = useRef(false);

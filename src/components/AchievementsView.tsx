@@ -7,6 +7,7 @@ import {
 import type { Challenge, ChallengeType, Game, Profile } from "@/lib/types";
 import { fmtDate } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
+import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 import {
   ACHIEVEMENTS, computeStatsByUser, computeRanking, challengeStandings, challengePhase,
   evaluateAchievement, TOTAL_TIERS, TIER_COLOR, TIER_LABEL, type UserStats, type AchievementDef,
@@ -267,6 +268,7 @@ export function CreateChallengeModal({ currentUser, onClose, onSave }: {
   onClose: () => void;
   onSave: (c: Partial<Challenge>) => Promise<void> | void;
 }) {
+  useBodyScrollLock();
   const year = new Date().getFullYear();
   const [title, setTitle] = useState("");
   const [type, setType] = useState<ChallengeType>("complete_games");
