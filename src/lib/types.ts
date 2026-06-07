@@ -20,10 +20,24 @@ export const OVERVIEW_SECTIONS = [
   { key: "ranking", label: "Ranking" },
   { key: "recently_added", label: "Recently Added" },
   { key: "recently_played", label: "Recently Played" },
+  { key: "upcoming", label: "Upcoming Games" },
   { key: "most_valued", label: "Most Valued" },
   { key: "by_system", label: "By System" },
   { key: "collection_value", label: "Estimated Value" },
 ] as const;
+
+// An unreleased game from IGDB, surfaced in the Upcoming view + dashboard rail.
+// Not stored in our DB — fetched live via /api/upcoming. `releaseDate` is the
+// IGDB `first_release_date` in unix seconds (earliest across platforms).
+export interface UpcomingGame {
+  igdbId: number;
+  title: string;
+  cover: string;        // box-art URL, or "" when absent
+  releaseDate: number;  // unix seconds
+  platforms: string[];  // abbreviations, e.g. ["PS5", "PC"]
+  genre: string;
+  hype: number;         // IGDB pre-release follow count
+}
 
 export interface ProgressRow {
   game_id: string;

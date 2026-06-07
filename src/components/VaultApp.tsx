@@ -4,13 +4,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search, Plus, X, Gamepad2, Trophy, Heart, Disc, LayoutGrid, Sparkles, Check, Box, CircleUser,
   ChevronLeft, ChevronDown, Pencil, Loader2, ImageIcon, Wand2, Library, Joystick,
-  ScanLine, Settings, LogOut, Clock, Tag, Star,
+  ScanLine, Settings, LogOut, Clock, Tag, Star, CalendarClock,
 } from "lucide-react";
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { useVault } from "@/lib/useVault";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 import AchievementsView, { CreateChallengeModal, RankingBoard } from "@/components/AchievementsView";
+import UpcomingView, { UpcomingRail } from "@/components/UpcomingView";
+import { useUpcoming } from "@/lib/useUpcoming";
 import { useAchievementToasts } from "@/components/useAchievementToasts";
 import { Avatar, AvatarPickerModal } from "@/components/Avatar";
 import { avatarSrc } from "@/lib/avatars";
@@ -56,7 +58,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   const me = profiles.find((p) => p.id === uid) ?? currentUser;
   const showSection = (key: string) => me.preferences?.overview?.[key] !== false;
 
-  const [view, setView] = useState<"home" | "collection" | "achievements">("home");
+  const [view, setView] = useState<"home" | "collection" | "achievements" | "upcoming">("home");
   const [detail, setDetail] = useState<Game | null>(null);
   const [editing, setEditing] = useState<GameSeed | null>(null);
   const [userMenu, setUserMenu] = useState(false);
@@ -72,6 +74,11 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   // Pop a toast whenever you cross an achievement tier. Gated on !loading so the
   // baseline is taken from fully-loaded data (no notification spam on first load).
   useAchievementToasts(games, profiles, uid, !loading);
+
+  // Upcoming releases (IGDB) — fetched lazily, only once the dashboard block is
+  // shown or the Upcoming view is opened, so we don't hit IGDB needlessly.
+  const upcomingEnabled = showSection("upcoming") || view === "upcoming";
+  const { games: upcoming, loading: upcomingLoading, error: upcomingError } = useUpcoming(upcomingEnabled);
 
   const resolveUpc = async (upc: string): Promise<{ title: string | null; error?: string; price?: PricePayload | null; pricecharting_id?: string | null }> => {
     const r = await fetch("/api/upc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ upc }) });
@@ -221,6 +228,20 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
                 </section>
               )}
 
+              {showSection("upcoming") && (
+                <section>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                    <CalendarClock size={15} color="var(--accent3)" />
+                    <span style={{ fontSize: 12, letterSpacing: 1.5, fontFamily: "var(--display)", fontWeight: 700 }}>UPCOMING GAMES</span>
+                    <button onClick={() => setView("upcoming")}
+                      style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", color: "var(--accent2)", fontFamily: "var(--display)", fontSize: 11, fontWeight: 700 }}>
+                      SEE ALL
+                    </button>
+                  </div>
+                  <UpcomingRail games={upcoming} loading={upcomingLoading} error={upcomingError} />
+                </section>
+              )}
+
               {showSection("most_valued") && mostValued.length > 0 && (
                 <section>
                   <SectionHead icon={Trophy} accent="var(--accent3)">MOST VALUED</SectionHead>
@@ -318,10 +339,17 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
         </div>
       )}
 
+      {view === "upcoming" && (
+        <div style={{ position: "relative", maxWidth: 940, margin: "0 auto", padding: "0 16px 110px" }}>
+          {topbar(false)}
+          <UpcomingView games={upcoming} loading={upcomingLoading} error={upcomingError} />
+        </div>
+      )}
+
       <nav style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 30, display: "flex", justifyContent: "center",
         padding: "10px 16px calc(10px + env(safe-area-inset-bottom))", background: "linear-gradient(to top, var(--bg) 60%, transparent)", pointerEvents: "none" }}>
         <div style={{ display: "flex", gap: 6, background: "var(--panel)", padding: 5, borderRadius: 99, border: "1px solid var(--line)", boxShadow: "0 8px 28px -8px #000", pointerEvents: "auto" }}>
-          {([["home", "DASHBOARD", CircleUser], ["collection", "COLLECTION", LayoutGrid], ["achievements", "ACHIEVEMENTS", Trophy]] as const).map(([k, lbl, Ic]) => (
+          {([["home", "DASHBOARD", CircleUser], ["collection", "COLLECTION", LayoutGrid], ["upcoming", "UPCOMING", CalendarClock], ["achievements", "ACHIEVEMENTS", Trophy]] as const).map(([k, lbl, Ic]) => (
             <button key={k} onClick={() => setView(k)} aria-label={lbl} className="nav-pill"
               style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: "none", cursor: "pointer",
                 borderRadius: 99, fontFamily: "var(--display)", fontWeight: 700, fontSize: 12, letterSpacing: 1,
