@@ -4,6 +4,23 @@ import { NextResponse, type NextRequest } from "next/server";
 // Server Components can't write cookies, so this proxy refreshes the auth
 // token on every request and writes it back to both the request and response.
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // PWA assets must be publicly reachable — the OS fetches the manifest, icons and
+  // splash images (and registers the service worker) without a session. Never
+  // redirect these to /login. This is the authoritative guard; the matcher below
+  // is just an optimization so the function usually doesn't even run for them.
+  if (
+    pathname === "/manifest.webmanifest" ||
+    pathname === "/sw.js" ||
+    pathname === "/icon" ||
+    pathname === "/apple-icon" ||
+    pathname.startsWith("/icons/") ||
+    pathname.startsWith("/splash/")
+  ) {
+    return NextResponse.next();
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -42,5 +59,5 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   // Run on everything except static assets.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|icon|apple-icon|icons|splash|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
 };
