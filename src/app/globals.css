@@ -66,7 +66,7 @@ input::placeholder, textarea::placeholder { color: #ffffff44; }
 .ministat:active { transform: scale(.97); }
 .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 14px; }
 /* Grid-density toggle in the Upcoming view. */
-.layout-btn { display: grid; place-items: center; width: 38px; height: 36px; border-radius: 7px; border: none;
+.layout-btn { display: grid; place-items: center; width: 38px; height: 30px; border-radius: 7px; border: none;
   cursor: pointer; transition: background .12s ease, color .12s ease; }
 .layout-btn:active { transform: scale(.94); }
 /* The Upcoming view can render ~200 cards at once; skip rendering the off-screen

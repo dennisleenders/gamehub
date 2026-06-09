@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { CalendarClock, Loader2, Heart, ChevronDown, Grid2x2, LayoutGrid, List, X } from "lucide-react";
 import type { UpcomingGame } from "@/lib/types";
 
@@ -13,6 +13,12 @@ const LAYOUTS = [
   { key: "list", Icon: List, col: "", gap: "" },
 ] as const;
 type LayoutKey = (typeof LAYOUTS)[number]["key"];
+
+// Multiplayer filters. The player-count filter matches games whose max player
+// count is at least the chosen threshold; the type filter (shown only once a
+// count is picked) narrows to a specific kind of multiplayer.
+const PLAYER_OPTIONS: [string, string][] = [["all", "Any"], ["2", "2+ players"], ["3", "3+ players"], ["4", "4+ players"], ["8", "8+ players"], ["16", "16+ players"]];
+const MP_TYPE_OPTIONS: [string, string][] = [["all", "Any type"], ["online", "Online"], ["couch", "Couch co-op"], ["split", "Split-screen"], ["lan", "LAN"]];
 
 // Release date (unix seconds) → "12 Jun". The month/year lives in the group
 // header, so the per-card date stays compact.
@@ -121,7 +127,13 @@ function UpcomingRow({ g, wishlisted, onClick }: { g: UpcomingGame; wishlisted?:
 export default function UpcomingView({ games, loading, error, wishlistIds, onOpen }: { games: UpcomingGame[] | null; loading: boolean; error: boolean; wishlistIds?: Set<number>; onOpen?: (g: UpcomingGame) => void }) {
   const [system, setSystem] = useState("all");
   const [wish, setWish] = useState("all");
+  const [players, setPlayers] = useState("all");
+  const [mpType, setMpType] = useState("all");
   const [layout, setLayout] = useState<LayoutKey>("comfortable");
+
+  // Picking "Any" players also clears the type filter (which is only shown while a
+  // player count is selected) so a stale type doesn't apply when re-enabled.
+  const onPlayers = (v: string) => { setPlayers(v); if (v === "all") setMpType("all"); };
 
   const isWished = (g: UpcomingGame) => !!wishlistIds?.has(g.igdbId);
 
@@ -137,8 +149,10 @@ export default function UpcomingView({ games, loading, error, wishlistIds, onOpe
     if (system !== "all" && !g.platforms.includes(system)) return false;
     if (wish === "yes" && !isWished(g)) return false;
     if (wish === "no" && isWished(g)) return false;
+    if (players !== "all" && g.maxPlayers < Number(players)) return false;
+    if (players !== "all" && mpType !== "all" && !g.mpTypes.includes(mpType)) return false;
     return true;
-  }), [games, system, wish, wishlistIds]);
+  }), [games, system, wish, players, mpType, wishlistIds]);
 
   // Bucket by calendar month; the API already returns them soonest-first, so each
   // month's games stay in order and the month keys sort chronologically.
@@ -159,7 +173,7 @@ export default function UpcomingView({ games, loading, error, wishlistIds, onOpe
 
   const cfg = LAYOUTS.find((l) => l.key === layout)!;
   const isList = layout === "list";
-  const hasFilter = system !== "all" || wish !== "all";
+  const hasFilter = system !== "all" || wish !== "all" || players !== "all" || mpType !== "all";
   const hasGames = !!games?.length;
 
   return (
@@ -183,7 +197,15 @@ export default function UpcomingView({ games, loading, error, wishlistIds, onOpe
               <Filter label="WISHLIST" value={wish} onChange={setWish}
                 options={[["all", "All games"], ["yes", "On wishlist"], ["no", "Not wishlisted"]]} />
             </div>
-            <div style={{ display: "flex", gap: 4, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: 4 }}>
+            <div style={{ flex: "1 1 150px", minWidth: 0 }}>
+              <Filter label={<>PLAYER AMOUNT <span style={{ fontWeight: 400, letterSpacing: 0 }}>*may be incomplete</span></>} value={players} onChange={onPlayers} options={PLAYER_OPTIONS} />
+            </div>
+            {players !== "all" && (
+              <div style={{ flex: "1 1 150px", minWidth: 0 }}>
+                <Filter label="MULTIPLAYER TYPE" value={mpType} onChange={setMpType} options={MP_TYPE_OPTIONS} />
+              </div>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 4, height: 40, boxSizing: "border-box", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: 4 }}>
               {LAYOUTS.map(({ key, Icon }) => (
                 <button key={key} onClick={() => setLayout(key)} aria-label={key === "list" ? "List view" : `${key} grid`} aria-pressed={layout === key}
                   className="layout-btn" style={{ background: layout === key ? "var(--accent2)" : "transparent", color: layout === key ? "var(--bg)" : "var(--ink-dim)" }}>
@@ -195,7 +217,7 @@ export default function UpcomingView({ games, loading, error, wishlistIds, onOpe
           <div style={{ display: "flex", alignItems: "center", gap: 12, paddingLeft: 2 }}>
             <span style={{ fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>{filtered.length} {filtered.length === 1 ? "game" : "games"}</span>
             {hasFilter && (
-              <button onClick={() => { setSystem("all"); setWish("all"); }}
+              <button onClick={() => { setSystem("all"); setWish("all"); setPlayers("all"); setMpType("all"); }}
                 style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", color: "var(--accent2)", fontFamily: "var(--display)", fontSize: 11, fontWeight: 700 }}>
                 <X size={12} /> RESET
               </button>
@@ -244,12 +266,12 @@ export default function UpcomingView({ games, loading, error, wishlistIds, onOpe
 
 // Compact select styled to match the collection's FilterField, kept local so this
 // view stays self-contained (no circular import back into VaultApp).
-function Filter({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: [string, string][] }) {
+function Filter({ label, value, onChange, options }: { label: ReactNode; value: string; onChange: (v: string) => void; options: [string, string][] }) {
   const current = options.find(([v]) => v === value)?.[1] ?? value;
   return (
     <label style={{ position: "relative", display: "flex", flexDirection: "column", gap: 4, cursor: "pointer", minWidth: 0 }}>
-      <span style={{ fontSize: 9, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, paddingLeft: 2 }}>{label}</span>
-      <div style={{ position: "relative", display: "flex", alignItems: "center", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: "10px 30px 10px 13px" }}>
+      <span style={{ fontSize: 9, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, paddingLeft: 2, whiteSpace: "nowrap" }}>{label}</span>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", height: 40, boxSizing: "border-box", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: "0 30px 0 13px" }}>
         <span style={{ fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{current}</span>
         <ChevronDown size={15} color="var(--ink-dim)" style={{ position: "absolute", right: 10, pointerEvents: "none" }} />
         <select value={value} onChange={(e) => onChange(e.target.value)} style={{ position: "absolute", inset: 0, opacity: 0, width: "100%", height: "100%", cursor: "pointer", border: "none", appearance: "none" }}>

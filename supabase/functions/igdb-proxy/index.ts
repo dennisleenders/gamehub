@@ -129,7 +129,7 @@ async function igdbGames(headers: Record<string, string>, body: string): Promise
 // stable `release_dates.human` string: full dates carry a day ("Jun 08, 2026"),
 // while month/quarter/year placeholders ("Jun 2026", "Q2 2026", "2026") never do.
 const UPCOMING_FIELDS =
-  "fields name, hypes, game_type, cover.image_id, genres.name, platforms.abbreviation, platforms.name, release_dates.date, release_dates.human;";
+  "fields name, hypes, game_type, cover.image_id, genres.name, platforms.abbreviation, platforms.name, release_dates.date, release_dates.human, multiplayer_modes.*;";
 // A day before the year (", 2026") only appears in full dates.
 const DAY_EXACT = /\d{1,2},\s*\d{4}/;
 
@@ -155,6 +155,21 @@ async function upcoming(headers: Record<string, string>, months: number, limit: 
       const dates = (g.release_dates ?? [])
         .filter((rd: any) => typeof rd.date === "number" && rd.date >= now && rd.date <= horizon && typeof rd.human === "string" && DAY_EXACT.test(rd.human))
         .map((rd: any) => rd.date as number);
+      // Multiplayer: max player count + which kinds of multiplayer it offers,
+      // collapsed across IGDB's per-platform multiplayer_modes entries. 0 players
+      // / empty types means single-player or no data — those drop out of the
+      // multiplayer filters client-side.
+      const mm = (g.multiplayer_modes ?? []) as any[];
+      const n = (v: unknown) => (typeof v === "number" && v > 0 ? v : 0);
+      const maxPlayers = mm.reduce(
+        (mx: number, m: any) => Math.max(mx, n(m.onlinemax), n(m.offlinemax), n(m.onlinecoopmax), n(m.offlinecoopmax)),
+        0,
+      );
+      const mpTypes: string[] = [];
+      if (mm.some((m) => m.onlinecoop || n(m.onlinemax) > 1 || n(m.onlinecoopmax) > 1)) mpTypes.push("online");
+      if (mm.some((m) => m.offlinecoop || n(m.offlinecoopmax) > 1 || n(m.offlinemax) > 1)) mpTypes.push("couch");
+      if (mm.some((m) => m.splitscreen)) mpTypes.push("split");
+      if (mm.some((m) => m.lancoop)) mpTypes.push("lan");
       return {
         igdbId: g.id,
         title: g.name ?? "",
@@ -165,6 +180,8 @@ async function upcoming(headers: Record<string, string>, months: number, limit: 
           .filter((x: unknown): x is string => typeof x === "string" && x.length > 0),
         genre: g.genres?.[0]?.name ?? "",
         hype: g.hypes ?? 0,
+        maxPlayers,
+        mpTypes,
       };
     })
     .filter((g) => g.title && g.releaseDate)

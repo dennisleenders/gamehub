@@ -37,6 +37,8 @@ export interface UpcomingGame {
   platforms: string[];  // abbreviations, e.g. ["PS5", "PC"]
   genre: string;
   hype: number;         // IGDB pre-release follow count
+  maxPlayers: number;   // highest player count across multiplayer modes (0 = unknown/single-player)
+  mpTypes: string[];    // multiplayer kinds offered: "online" | "couch" | "split" | "lan"
 }
 
 export interface ProgressRow {
