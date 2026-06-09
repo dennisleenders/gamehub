@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Joystick, Lock, UserPlus, AlertCircle } from "lucide-react";
+import { Joystick, Lock, UserPlus, AlertCircle, Loader2 } from "lucide-react";
 import { AvatarGrid } from "@/components/Avatar";
 import { AVATARS } from "@/lib/avatars";
 import { PROFILE_COLORS } from "@/lib/types";
@@ -18,10 +18,15 @@ export default function LoginPage() {
   const [color, setColor] = useState(PROFILE_COLORS[0]);
   const [avatar, setAvatar] = useState(AVATARS[0].id);
   const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
+  // idle → working (authenticating) → redirecting (success, navigating away).
+  // We deliberately stay in `redirecting` through the navigation so the button
+  // never flips back to its default label after a successful sign-in.
+  const [phase, setPhase] = useState<"idle" | "working" | "redirecting">("idle");
+  const busy = phase !== "idle";
 
   async function submit() {
-    setErr(""); setBusy(true);
+    if (busy) return;
+    setErr(""); setPhase("working");
     try {
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
@@ -34,14 +39,15 @@ export default function LoginPage() {
         });
         if (error) throw error;
       }
-      // Session is persisted by Supabase and auto-refreshed by middleware —
-      // this is the "never log out" behaviour.
+      // Success — keep the button loading through the redirect (no flip back to
+      // the default label). The session is persisted by Supabase and
+      // auto-refreshed by middleware — the "never log out" behaviour.
+      setPhase("redirecting");
       router.refresh();
       router.push("/");
     } catch (e: any) {
       setErr(e.message ?? "Something went wrong.");
-    } finally {
-      setBusy(false);
+      setPhase("idle");
     }
   }
 
@@ -101,9 +107,13 @@ export default function LoginPage() {
 
           <button onClick={submit} disabled={busy}
             style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 18,
-              padding: "13px 0", border: "none", borderRadius: "var(--radius)", cursor: "pointer", background: "var(--accent2)", color: "var(--bg)",
+              padding: "13px 0", border: "none", borderRadius: "var(--radius)", cursor: busy ? "wait" : "pointer", background: "var(--accent2)", color: "var(--bg)",
               fontFamily: "var(--display)", fontWeight: 700, fontSize: 14, opacity: busy ? 0.6 : 1 }}>
-            {mode === "login" ? <><Lock size={16} /> ENTER VAULT</> : <><UserPlus size={16} /> CREATE & ENTER</>}
+            {phase === "redirecting"
+              ? <><Loader2 size={16} className="spin" /> OPENING VAULT…</>
+              : phase === "working"
+                ? <><Loader2 size={16} className="spin" /> {mode === "login" ? "SIGNING IN…" : "CREATING…"}</>
+                : mode === "login" ? <><Lock size={16} /> ENTER VAULT</> : <><UserPlus size={16} /> CREATE & ENTER</>}
           </button>
 
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)", textAlign: "center" }}>

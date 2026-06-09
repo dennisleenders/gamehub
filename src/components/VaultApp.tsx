@@ -11,13 +11,13 @@ import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { useVault } from "@/lib/useVault";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 import AchievementsView, { CreateChallengeModal, RankingBoard } from "@/components/AchievementsView";
-import UpcomingView, { UpcomingRail } from "@/components/UpcomingView";
+import UpcomingView, { UpcomingRail, UpcomingCover } from "@/components/UpcomingView";
 import { useUpcoming } from "@/lib/useUpcoming";
 import { useAchievementToasts } from "@/components/useAchievementToasts";
 import { Avatar, AvatarPickerModal } from "@/components/Avatar";
 import { avatarSrc } from "@/lib/avatars";
 import {
-  type Game, type Profile, type PlayStatus, PLAY_STATUS, PLATFORM_TINT,
+  type Game, type Profile, type PlayStatus, type UpcomingGame, PLAY_STATUS, PLATFORM_TINT,
   CONDITIONS, REGIONS, OVERVIEW_SECTIONS, money, fmtDate,
 } from "@/lib/types";
 
@@ -60,6 +60,9 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
 
   const [view, setView] = useState<"home" | "collection" | "achievements" | "upcoming">("home");
   const [detail, setDetail] = useState<Game | null>(null);
+  // The upcoming release whose detail modal is open (separate from `detail`, which
+  // is for collection games — upcoming games aren't in our DB).
+  const [upcomingDetail, setUpcomingDetail] = useState<UpcomingGame | null>(null);
   const [editing, setEditing] = useState<GameSeed | null>(null);
   const [userMenu, setUserMenu] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -96,6 +99,17 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   const owned = games.filter((g) => g.status === "owned");
   const wishlist = games.filter((g) => g.status === "wishlist");
   const collectionValue = owned.reduce((s, g) => s + (g.value_cents || 0), 0);
+
+  // IGDB ids of wishlisted games, so the Upcoming view/rail can flag (and filter
+  // by) releases that are already on the wishlist. Matched on igdb_id.
+  const wishlistIgdbIds = useMemo(
+    () => new Set(games.filter((g) => g.status === "wishlist" && g.igdb_id != null).map((g) => g.igdb_id as number)),
+    [games],
+  );
+
+  // The collection game (if any) that matches the open upcoming release, so its
+  // modal can show "already added" instead of an add button.
+  const upcomingExisting = upcomingDetail ? games.find((g) => g.igdb_id === upcomingDetail.igdbId) ?? null : null;
 
   const playingSlides: { g: Game; pid: string; hours: number }[] = [];
   owned.forEach((g) => playersOf(g).forEach(([pid, p]) => playingSlides.push({ g, pid, hours: p.hours })));
@@ -238,7 +252,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
                       SEE ALL
                     </button>
                   </div>
-                  <UpcomingRail games={upcoming} loading={upcomingLoading} error={upcomingError} />
+                  <UpcomingRail games={upcoming} loading={upcomingLoading} error={upcomingError} wishlistIds={wishlistIgdbIds} onOpen={setUpcomingDetail} />
                 </section>
               )}
 
@@ -342,7 +356,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
       {view === "upcoming" && (
         <div style={{ position: "relative", maxWidth: 940, margin: "0 auto", padding: "0 16px 110px" }}>
           {topbar(false)}
-          <UpcomingView games={upcoming} loading={upcomingLoading} error={upcomingError} />
+          <UpcomingView games={upcoming} loading={upcomingLoading} error={upcomingError} wishlistIds={wishlistIgdbIds} onOpen={setUpcomingDetail} />
         </div>
       )}
 
@@ -361,6 +375,13 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
       </nav>
 
       {liveDetail && <DetailView game={liveDetail} userById={userById} onClose={() => setDetail(null)} onEdit={() => setEditing(liveDetail)} />}
+      {upcomingDetail && (
+        <UpcomingDetail
+          g={upcomingDetail}
+          existingStatus={upcomingExisting?.status ?? null}
+          onClose={() => setUpcomingDetail(null)}
+          onAdd={(payload) => saveGame(payload)} />
+      )}
       {editing !== null && (
         <GameModal game={editing} currentUser={currentUser} platforms={platforms} genres={genres} priceEnabled={priceChartingEnabled}
           onClose={() => setEditing(null)}
@@ -795,6 +816,120 @@ function DetailView({ game, userById, onClose, onEdit }: { game: Game; userById:
 
           {g.notes && <div style={{ marginTop: 18 }}><div style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", marginBottom: 6 }}>NOTES</div><div style={{ fontSize: 14, lineHeight: 1.55, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: "12px 14px" }}>{g.notes}</div></div>}
           {addedByUser && <div style={{ marginTop: 20, paddingTop: 14, borderTop: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 9 }}><Avatar user={addedByUser} size={22} /><span style={{ fontSize: 12, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>Added by {addedByUser.name}</span></div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Detail modal for an unreleased IGDB game from the Upcoming view. A trimmed
+// DetailView: no players/HLTB/value/condition — just developer, publisher, genre,
+// the release date, and a one-tap "add to wishlist". Developer/publisher (plus a
+// blurb + screenshots) aren't in the upcoming feed, so they're enriched on open
+// via the same IGDB lookup the add/edit FILL uses; best-effort.
+function UpcomingDetail({ g, existingStatus, onClose, onAdd }: {
+  g: UpcomingGame;
+  existingStatus: "owned" | "wishlist" | null;
+  onClose: () => void;
+  onAdd: (payload: Partial<Game> & { myStatus?: PlayStatus }) => Promise<void>;
+}) {
+  useBodyScrollLock();
+  const [meta, setMeta] = useState<{ developer: string; publisher: string; description: string; screenshots: string[]; rating: number | null } | null>(null);
+  const [metaLoading, setMetaLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setMeta(null);
+    setMetaLoading(true);
+    fetch("/api/metadata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: g.title }) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((m) => { if (active && m) setMeta({ developer: m.developer || "", publisher: m.publisher || "", description: m.description || "", screenshots: Array.isArray(m.screenshots) ? m.screenshots : [], rating: m.rating ?? null }); })
+      .catch(() => {})
+      .finally(() => { if (active) setMetaLoading(false); });
+    return () => { active = false; };
+  }, [g.title]);
+
+  const released = new Date(g.releaseDate * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  const dim = (v: string) => (metaLoading ? "…" : v || "—");
+  const facts: [string, string][] = [
+    ["Developer", dim(meta?.developer ?? "")],
+    ["Publisher", dim(meta?.publisher ?? "")],
+    ["Released", released],
+    ["Genre", g.genre || "—"],
+  ];
+
+  const handleAdd = async () => {
+    setAdding(true);
+    await onAdd({
+      title: g.title,
+      platform: g.platforms[0] ?? "—",
+      status: "wishlist",
+      cover: g.cover || null,
+      genre: g.genre || null,
+      year: new Date(g.releaseDate * 1000).getFullYear(),
+      igdb_id: g.igdbId,
+      developer: meta?.developer || null,
+      publisher: meta?.publisher || null,
+      description: meta?.description || null,
+      screenshots: meta?.screenshots?.length ? meta.screenshots : undefined,
+      rating: meta?.rating ?? null,
+    });
+    setAdding(false);
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", zIndex: 60, display: "flex", alignItems: "flex-end", justifyContent: "center" }} className="fade">
+      <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "94vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
+        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", background: "var(--panel)", borderBottom: "1px solid var(--line)" }}>
+          <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)", fontFamily: "var(--display)", fontSize: 12, fontWeight: 700 }}><ChevronLeft size={17} /> BACK</button>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, fontFamily: "var(--display)", color: "var(--accent3)" }}><CalendarClock size={13} /> UPCOMING</span>
+        </div>
+        <div style={{ padding: 20, overflowY: "auto", overflowX: "hidden", flex: 1, minHeight: 0 }}>
+          <div style={{ display: "flex", gap: 18 }}>
+            <div style={{ width: 130, flexShrink: 0 }}><UpcomingCover g={g} ratio={1.33} wishlisted={existingStatus === "wishlist"} /></div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              {g.platforms.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {g.platforms.map((p) => { const t = tintFor(p); return <span key={p} style={{ fontSize: 10, fontFamily: "var(--display)", fontWeight: 700, padding: "3px 9px", borderRadius: "var(--radius)", border: `1px solid ${t}`, color: t, background: t + "1a" }}>{p}</span>; })}
+                </div>
+              )}
+              <h1 style={{ fontFamily: "var(--display)", fontSize: 22, lineHeight: 1.18, margin: "11px 0 0", fontWeight: 800 }}>{g.title}</h1>
+              {(meta?.developer || meta?.publisher) && <div style={{ fontSize: 12, color: "var(--ink-dim)", marginTop: 8 }}>{meta.developer}{meta.developer && meta.publisher && meta.developer !== meta.publisher ? " · " : ""}{meta.publisher !== meta.developer ? meta.publisher : ""}</div>}
+              {meta?.rating != null && <div style={{ marginTop: 12 }}><StarRating value={meta.rating} size={17} /></div>}
+            </div>
+          </div>
+
+          {(meta?.description || metaLoading) && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", marginBottom: 7 }}>ABOUT</div>
+              {meta?.description
+                ? <p style={{ fontSize: 14.5, lineHeight: 1.6, margin: 0 }}>{meta.description}</p>
+                : <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>{[92, 100, 70].map((w) => <div key={w} className="skeleton" style={{ height: 11, borderRadius: 6, width: `${w}%` }} />)}</div>}
+            </div>
+          )}
+
+          <Screenshots shots={meta?.screenshots} />
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, marginTop: 20, background: "var(--line)", border: "1px solid var(--line)", borderRadius: "var(--radius)", overflow: "hidden" }}>
+            {facts.map(([k, v]) => <div key={k} style={{ background: "var(--panel)", padding: "12px 14px" }}><div style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>{k.toUpperCase()}</div><div style={{ fontSize: 13.5, fontWeight: 700, marginTop: 4 }}>{v}</div></div>)}
+          </div>
+
+          <div style={{ marginTop: 20 }}>
+            {existingStatus === "wishlist" ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "13px", borderRadius: "var(--radius)", background: "var(--bg)", border: "1px solid var(--accent)", color: "var(--accent)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 13 }}>
+                <Heart size={15} fill="var(--accent)" /> ON YOUR WISHLIST
+              </div>
+            ) : existingStatus === "owned" ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "13px", borderRadius: "var(--radius)", background: "var(--bg)", border: "1px solid var(--good)", color: "var(--good)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 13 }}>
+                <Box size={15} /> IN YOUR COLLECTION
+              </div>
+            ) : (
+              <button onClick={handleAdd} disabled={adding} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "13px", borderRadius: "var(--radius)", background: "var(--accent)", border: "none", color: "var(--bg)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 13, cursor: adding ? "default" : "pointer", opacity: adding ? 0.7 : 1 }}>
+                {adding ? <Loader2 size={15} className="spin" /> : <Heart size={15} fill="var(--bg)" />} ADD TO WISHLIST
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
