@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search, Plus, X, Gamepad2, Trophy, Heart, Disc, LayoutGrid, Sparkles, Check, Box, CircleUser,
-  ChevronLeft, ChevronDown, Pencil, Loader2, ImageIcon, Wand2, Library, Joystick,
+  ChevronLeft, ChevronDown, Pencil, Loader2, ImageIcon, Library, Joystick,
   ScanLine, Settings, LogOut, Clock, Tag, Star, CalendarClock, Play, Minus,
 } from "lucide-react";
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
@@ -1069,6 +1069,19 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
   const [pricedName, setPricedName] = useState<string>(game.priceTiers ? (game.title || "") : "");
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
 
+  // --- Title typeahead (combobox) ---
+  type Suggestion = { igdbId: number; title: string; platforms: string[] };
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [showSuggest, setShowSuggest] = useState(false);
+  const [suggestLoading, setSuggestLoading] = useState(false); // request pending (incl. debounce)
+  const [activeIdx, setActiveIdx] = useState(-1); // highlighted row for keyboard nav
+  const suggestBoxRef = useRef<HTMLDivElement | null>(null); // wrapper, for outside-click detection
+  const suggestAbortRef = useRef<AbortController | null>(null);
+  // True only when a title change comes from real typing (not a programmatic set
+  // when picking a suggestion or filling). Gates the debounced fetch so selecting
+  // a suggestion doesn't immediately re-open the dropdown.
+  const typingRef = useRef(false);
+
   // Replay handling: completions so far, and whether this edit starts a new run.
   const completions = (game.playthroughs?.[currentUser.id]?.length ?? 0) + (myProg.status === "finished" ? 1 : 0);
   const startingReplay = myProg.status === "finished" && f.myStatus === "playing";
@@ -1080,7 +1093,10 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
     set("myStatus", k);
   };
 
-  const autoFill = async () => {
+  // Pull metadata into the form. With no argument it's a title-text search (the
+  // FILL button); when an igdbId is passed (the user picked a suggestion) the
+  // lookup is by exact id, so the precise game fills even among same-named editions.
+  const autoFill = async (igdbId?: number | null) => {
     if (!f.title.trim()) return;
     setFetchState("loading");
     try {
@@ -1088,7 +1104,7 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
       // it). When we do ask, pass the scanned UPC so PriceCharting matches the
       // exact edition rather than guessing from the title.
       const wantPrice = priceEnabled && !priceTiers;
-      const r = await fetch("/api/metadata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: f.title.trim(), upc: f.upc || undefined, withPrice: wantPrice }) });
+      const r = await fetch("/api/metadata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: f.title.trim(), upc: f.upc || undefined, withPrice: wantPrice, igdbId: igdbId ?? undefined }) });
       const m = await r.json();
       // Price (in EUR cents) only comes back when we asked and a product matched.
       // When present, fill the value from the tier matching the current condition
@@ -1099,10 +1115,9 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
         : null;
       if (tiers) { setPriceTiers(tiers); setPricedName(m.price?.name || ""); }
       setF((p: any) => {
-        // IGDB rating is 0–100; snap to the nearest half-star (multiple of 10) so
-        // the stored value lines up with the star picker.
-        const igdbRating = m.rating != null ? Math.round(m.rating / 10) * 10 : p.rating;
-        const next = { ...p, cover: m.cover || p.cover, description: m.description || p.description, developer: m.developer || p.developer, publisher: m.publisher || p.publisher, year: m.year || p.year, genre: genres.includes(m.genre) ? m.genre : p.genre, rating: igdbRating, hltb: m.hltb || p.hltb, screenshots: m.screenshots?.length ? m.screenshots : p.screenshots, igdb_id: m.igdb_id ?? p.igdb_id };
+        // Rating is intentionally left untouched — it's the user's own score to set,
+        // so we never seed it from IGDB.
+        const next = { ...p, title: m.title || p.title, cover: m.cover || p.cover, description: m.description || p.description, developer: m.developer || p.developer, publisher: m.publisher || p.publisher, year: m.year || p.year, genre: genres.includes(m.genre) ? m.genre : p.genre, hltb: m.hltb || p.hltb, screenshots: m.screenshots?.length ? m.screenshots : p.screenshots, igdb_id: m.igdb_id ?? p.igdb_id };
         if (tiers) {
           next.pricecharting_id = m.price.pricecharting_id ?? p.pricecharting_id;
           const cents = tierForCondition(tiers, p.condition);
@@ -1112,6 +1127,71 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
       });
       setFetchState("done");
     } catch { setFetchState("empty"); }
+  };
+
+  // Debounced title typeahead. Fires only while the user is actively typing
+  // (typingRef), min 2 chars. The box opens immediately in a "searching" state so
+  // typing feels responsive; the actual request is debounced 300ms after the last
+  // keystroke. Each run aborts the previous in-flight request so a stale response
+  // can't clobber a newer query.
+  useEffect(() => {
+    if (!typingRef.current) return;
+    suggestAbortRef.current?.abort(); // cancel any prior in-flight request first
+    const q = f.title.trim();
+    if (q.length < 2) { setSuggestions([]); setSuggestLoading(false); setShowSuggest(false); return; }
+    setShowSuggest(true);
+    setSuggestLoading(true);
+    const ctrl = new AbortController();
+    suggestAbortRef.current = ctrl;
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch("/api/suggest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: q }), signal: ctrl.signal });
+        const data = await r.json();
+        const list: Suggestion[] = Array.isArray(data?.suggestions) ? data.suggestions : [];
+        setSuggestions(list);
+        setActiveIdx(-1);
+        setSuggestLoading(false);
+      } catch (e) {
+        // An abort means a newer keystroke took over — leave state to that run.
+        // A real failure stops the spinner and falls through to "no matches".
+        if ((e as { name?: string })?.name !== "AbortError") { setSuggestions([]); setSuggestLoading(false); }
+      }
+    }, 300);
+    return () => { clearTimeout(t); ctrl.abort(); };
+  }, [f.title]);
+
+  // Close the dropdown on a click outside the title combobox.
+  useEffect(() => {
+    if (!showSuggest) return;
+    const onDown = (e: MouseEvent) => {
+      if (suggestBoxRef.current && !suggestBoxRef.current.contains(e.target as Node)) setShowSuggest(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [showSuggest]);
+
+  // Picking a suggestion: this title change is programmatic (typingRef off so the
+  // dropdown doesn't reopen), then fill the exact game by its IGDB id.
+  const pickSuggestion = (s: Suggestion) => {
+    typingRef.current = false;
+    suggestAbortRef.current?.abort();
+    setShowSuggest(false);
+    setSuggestLoading(false);
+    setSuggestions([]);
+    setActiveIdx(-1);
+    setFetchState("idle");
+    set("title", s.title);
+    set("igdb_id", s.igdbId);
+    void autoFill(s.igdbId);
+  };
+
+  const onTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showSuggest || suggestions.length === 0) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx((i) => (i + 1) % suggestions.length); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIdx((i) => (i <= 0 ? suggestions.length - 1 : i - 1)); }
+    else if (e.key === "Enter") {
+      if (activeIdx >= 0 && activeIdx < suggestions.length) { e.preventDefault(); pickSuggestion(suggestions[activeIdx]); }
+    } else if (e.key === "Escape") { e.preventDefault(); setShowSuggest(false); }
   };
 
   const save = () => {
@@ -1150,12 +1230,57 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
 
         <div style={{ marginBottom: 14 }}>
           <label style={lbl}>TITLE</label>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input style={inp} value={f.title} onChange={(e) => { set("title", e.target.value); setFetchState("idle"); }} placeholder="Game title" autoFocus />
-            <button onClick={autoFill} disabled={!f.title.trim() || fetchState === "loading"} style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "0 13px", border: "none", borderRadius: "var(--radius)", cursor: f.title.trim() ? "pointer" : "not-allowed", background: "var(--accent3)", color: "var(--bg)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 11, opacity: f.title.trim() ? 1 : .5 }}>
-              {fetchState === "loading" ? <Loader2 size={14} className="spin" /> : <Wand2 size={14} />} FILL
-            </button>
+          <div ref={suggestBoxRef} style={{ position: "relative" }}>
+            <input style={inp} value={f.title}
+              onChange={(e) => { typingRef.current = true; set("title", e.target.value); setFetchState("idle"); }}
+              onKeyDown={onTitleKeyDown}
+              onFocus={() => { if (suggestions.length) setShowSuggest(true); }}
+              placeholder="Start typing a game title…" autoComplete="off" autoFocus
+              role="combobox" aria-expanded={showSuggest} aria-autocomplete="list" />
+            {showSuggest && (
+              <div role="listbox" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 80, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", boxShadow: "0 10px 30px #000a", overflow: "hidden", maxHeight: 320, overflowY: "auto" }}>
+                {suggestLoading ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 12px", color: "var(--ink-dim)", fontSize: 12.5, fontFamily: "var(--display)" }}>
+                    <Loader2 size={13} className="spin" /> Searching for titles…
+                  </div>
+                ) : suggestions.length === 0 ? (
+                  <div style={{ padding: "11px 12px", color: "var(--ink-dim)", fontSize: 12.5, fontFamily: "var(--display)" }}>No matches found.</div>
+                ) : (
+                  suggestions.map((s, i) => {
+                    // One system → a tag in that system's colour. More than one →
+                    // a neutral "MULTIPLE" tag, with every system listed below the title.
+                    const multi = s.platforms.length > 1;
+                    const single = s.platforms.length === 1 ? s.platforms[0] : null;
+                    const tint = single ? tintFor(single) : null;
+                    return (
+                      <button key={s.igdbId} type="button" role="option" aria-selected={i === activeIdx}
+                        onMouseDown={(e) => { e.preventDefault(); pickSuggestion(s); }}
+                        onMouseEnter={() => setActiveIdx(i)}
+                        style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "9px 12px", border: "none", cursor: "pointer", background: i === activeIdx ? "var(--accent2)22" : "transparent", borderBottom: i < suggestions.length - 1 ? "1px solid var(--line)" : "none" }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ color: "var(--ink)", fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.title}</div>
+                          {multi && (
+                            <div style={{ marginTop: 2, fontSize: 10.5, color: "var(--ink-dim)", fontFamily: "var(--display)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.platforms.join(" · ")}</div>
+                          )}
+                        </div>
+                        {multi && (
+                          <span style={{ flexShrink: 0, fontSize: 10, fontFamily: "var(--display)", fontWeight: 700, padding: "3px 8px", borderRadius: "var(--radius)", border: "1px solid var(--line)", color: "var(--ink-dim)", background: "transparent" }}>MULTIPLE</span>
+                        )}
+                        {single && tint && (
+                          <span style={{ flexShrink: 0, fontSize: 10, fontFamily: "var(--display)", fontWeight: 700, padding: "3px 8px", borderRadius: "var(--radius)", border: `1px solid ${tint}`, color: tint, background: tint + "1a" }}>{single}</span>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>
+          {fetchState === "loading" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8, fontSize: 11.5, fontWeight: 700, color: "var(--accent3)", fontFamily: "var(--display)" }}>
+              <Loader2 size={13} className="spin" /> Filling in details…
+            </div>
+          )}
         </div>
 
         <div style={{ marginBottom: 16, display: "flex", gap: 14 }}>
@@ -1164,7 +1289,7 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
             <label style={lbl}>BOX ART</label>
             <input style={inp} value={f.cover} onChange={(e) => set("cover", e.target.value)} placeholder="Image URL (or tap FILL)" />
             <span style={{ fontSize: 10, color: fetchState === "empty" ? "var(--bad)" : "var(--ink-dim)", fontFamily: "var(--display)", lineHeight: 1.4 }}>
-              {fetchState === "loading" && `Looking up via IGDB + HLTB${priceEnabled ? " + PriceCharting" : ""}…`}{fetchState === "done" && (pricedName ? `✓ Details filled · priced from “${pricedName}”` : "✓ Details filled.")}{fetchState === "empty" && "No match. Fill manually."}{fetchState === "idle" && "Tap FILL to auto-fetch."}
+              {fetchState === "loading" && `Looking up via IGDB + HLTB${priceEnabled ? " + PriceCharting" : ""}…`}{fetchState === "done" && (pricedName ? `✓ Details filled · priced from “${pricedName}”` : "✓ Details filled.")}{fetchState === "empty" && "No match. Fill manually."}{fetchState === "idle" && "Pick a suggested title to auto-fill, or enter details manually."}
             </span>
           </div>
         </div>

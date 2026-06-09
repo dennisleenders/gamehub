@@ -11,7 +11,7 @@ export async function POST(req: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const { title, upc, withPrice } = await req.json();
+  const { title, upc, withPrice, igdbId } = await req.json();
   if (!title) return NextResponse.json({ error: "title required" }, { status: 400 });
 
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -45,7 +45,7 @@ export async function POST(req: Request) {
   // Fetch the FX rate alongside the lookups (only when pricing) so it adds no
   // latency to the FILL.
   const [igdb, hltb, pcMatch, rate] = await Promise.all([
-    call("igdb-proxy", { title }),
+    call("igdb-proxy", { title, igdbId }),
     call("hltb-proxy", { title }),
     priceLookup(),
     doPrice ? usdToEurRate() : Promise.resolve(0),

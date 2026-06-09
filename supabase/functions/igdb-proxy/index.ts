@@ -37,10 +37,13 @@ const clampInt = (v: unknown, min: number, max: number, fallback: number) => {
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
 };
 
-// A single best-match lookup for the add/edit form's FILL.
-async function search(headers: Record<string, string>, title: string) {
-  const body = `
-    search "${title.replace(/"/g, '\\"')}";
+// A single best-match lookup for the add/edit form's FILL. When an igdbId is
+// given (the user picked a typeahead suggestion) we fetch that exact game by id,
+// which disambiguates same-named remakes/remasters; otherwise we fall back to a
+// best-match title search. Both queries are built server-side — no injection
+// (igdbId is clamped to a positive integer by the dispatcher).
+async function search(headers: Record<string, string>, title: string, igdbId?: number) {
+  const fields = `
     fields name, summary, first_release_date, rating,
            cover.image_id, screenshots.image_id,
            genres.name,
@@ -48,6 +51,9 @@ async function search(headers: Record<string, string>, title: string) {
            involved_companies.developer, involved_companies.publisher;
     limit 1;
   `;
+  const body = igdbId
+    ? `where id = ${igdbId}; ${fields}`
+    : `search "${title.replace(/"/g, '\\"')}"; ${fields}`;
   const res = await fetch("https://api.igdb.com/v4/games", { method: "POST", headers, body });
   const games = await res.json();
   const g = games?.[0];
@@ -71,6 +77,37 @@ async function search(headers: Record<string, string>, title: string) {
       screenshots: (g.screenshots ?? []).slice(0, 4).map((s: any) => imgUrl(s.image_id, "t_screenshot_big")),
     },
   });
+}
+
+// Lightweight typeahead for the title field's autocomplete: up to 7 candidates,
+// just enough to render a row (name + platforms) and to fetch the exact game
+// later via search-by-id. Restricted to actual games — main game (0), standalone
+// expansion (4), remake (8), remaster (9), port (11) — so DLC, bundles, packs,
+// episodes, etc. don't clutter the list. Query is built server-side — no injection.
+const SUGGEST_GAME_TYPES = "(0,4,8,9,11)";
+async function suggest(headers: Record<string, string>, q: string) {
+  const term = q.trim();
+  if (term.length < 2) return json({ suggestions: [] });
+  const body = `
+    search "${term.replace(/"/g, '\\"')}";
+    where game_type = ${SUGGEST_GAME_TYPES};
+    fields name, platforms.abbreviation, platforms.name;
+    limit 7;
+  `;
+  const res = await fetch("https://api.igdb.com/v4/games", { method: "POST", headers, body });
+  const games = await res.json().catch(() => null);
+  if (!Array.isArray(games)) return json({ suggestions: [] });
+
+  const suggestions = games
+    .filter((g: any) => g && typeof g.name === "string")
+    .map((g: any) => ({
+      igdbId: g.id,
+      title: g.name as string,
+      platforms: (g.platforms ?? [])
+        .map((p: any) => p.abbreviation || p.name)
+        .filter((x: unknown): x is string => typeof x === "string" && x.length > 0),
+    }));
+  return json({ suggestions });
 }
 
 // One IGDB /games query. `ok` is false when IGDB returns an error shape (an
@@ -150,7 +187,9 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
     const payload = await req.json().catch(() => ({}));
-    const mode = payload?.mode === "upcoming" ? "upcoming" : "search";
+    const mode =
+      payload?.mode === "upcoming" ? "upcoming" :
+      payload?.mode === "suggest" ? "suggest" : "search";
 
     const token = await getToken();
     const headers = {
@@ -178,9 +217,17 @@ Deno.serve(async (req) => {
       return res;
     }
 
+    if (mode === "suggest") {
+      const q = typeof payload?.title === "string" ? payload.title : "";
+      return await suggest(headers, q);
+    }
+
     const title = payload?.title;
-    if (!title) return json({ error: "title required" }, 400);
-    return await search(headers, title);
+    const rawId = payload?.igdbId;
+    // Only accept a positive integer id; anything else falls back to title search.
+    const igdbId = Number.isFinite(Number(rawId)) && Number(rawId) > 0 ? Math.floor(Number(rawId)) : undefined;
+    if (!title && !igdbId) return json({ error: "title required" }, 400);
+    return await search(headers, title ?? "", igdbId);
   } catch (e) {
     return json({ error: String(e) }, 500);
   }
