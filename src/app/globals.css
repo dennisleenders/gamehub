@@ -19,7 +19,7 @@
 html, body { margin: 0; overflow-x: hidden; max-width: 100%; }
 body { background: var(--bg); color: var(--ink); font-family: var(--body); }
 button, select, a, [role="button"] { touch-action: manipulation; }
-button { -webkit-tap-highlight-color: transparent; }
+button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 svg { display: block; }
 input::placeholder, textarea::placeholder { color: #ffffff44; }
 

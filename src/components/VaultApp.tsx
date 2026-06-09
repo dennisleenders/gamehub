@@ -594,7 +594,7 @@ function HeroSlide({ g, hours, player, currentUser, onOpen }: { g: Game; hours: 
       <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
         {showArt ? <img src={g.cover!} alt="" aria-hidden style={{ width: "100%", height: "100%", objectFit: "cover", transform: "scale(1.25)", filter: "blur(28px) saturate(1.2) brightness(.6)" }} /> : <div style={{ position: "absolute", inset: 0, background: `linear-gradient(160deg, ${tint}55, var(--bg))` }} />}
       </div>
-      <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
+      <div onClick={() => onOpen(g)} role="button" aria-label={`Open ${g.title}`} style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", cursor: "pointer" }}>
         {showArt ? <img src={g.cover!} alt={g.title} onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontFamily: "var(--display)", fontSize: 96, color: tint, opacity: .5 }}>{(g.title || "?")[0]}</span>}
       </div>
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "linear-gradient(to top, #13111a 0%, rgba(19,17,26,0.82) 34%, rgba(19,17,26,0.12) 64%, rgba(19,17,26,0.28) 100%)" }} />
@@ -785,7 +785,7 @@ function DetailView({ game, userById, currentUser, onProgress, onClose, onEdit }
       <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "94vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
         <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", background: "var(--panel)", borderBottom: "1px solid var(--line)" }}>
           <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)", fontFamily: "var(--display)", fontSize: 12, fontWeight: 700 }}><ChevronLeft size={17} /> BACK</button>
-          <button onClick={onEdit} style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--accent2)", color: "var(--bg)", border: "none", fontFamily: "var(--display)", fontWeight: 700, fontSize: 12, padding: "8px 14px", borderRadius: "var(--radius)", cursor: "pointer" }}><Pencil size={14} /> EDIT</button>
+          <button onClick={onEdit} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)", fontFamily: "var(--display)", fontSize: 12, fontWeight: 700 }}><Pencil size={14} /> EDIT</button>
         </div>
         <div style={{ padding: 20, overflowY: "auto", overflowX: "hidden", flex: 1, minHeight: 0 }}>
           <div style={{ display: "flex", gap: 18 }}>
