@@ -18,7 +18,7 @@ import { Avatar, AvatarPickerModal } from "@/components/Avatar";
 import { avatarSrc } from "@/lib/avatars";
 import {
   type Game, type Profile, type PlayStatus, type UpcomingGame, PLAY_STATUS, PLATFORM_TINT,
-  CONDITIONS, REGIONS, OVERVIEW_SECTIONS, money, fmtDate,
+  CONDITIONS, OVERVIEW_SECTIONS, money, fmtDate,
 } from "@/lib/types";
 
 const FALLBACK_TINTS = ["#9b8cff", "#6fc7b3", "#e6b667", "#e0738a", "#7fb2ff", "#c98cff"];
@@ -26,6 +26,8 @@ const hashIdx = (s = "", n = 1) => { let h = 0; for (let i = 0; i < s.length; i+
 const tintFor = (p: string) => PLATFORM_TINT[p] || FALLBACK_TINTS[hashIdx(p, FALLBACK_TINTS.length)];
 const playColor = (k: string) => k === "playing" ? "var(--accent2)" : k === "finished" ? "var(--good)" : k === "abandoned" ? "var(--bad)" : "var(--ink-dim)";
 const getProg = (g: Game, uid?: string) => (uid && g.progress?.[uid]) || { status: "backlog" as PlayStatus, hours: 0 };
+// "CIB" is kept as the stored/logic value but shown as "Complete" in the UI.
+const conditionLabel = (c?: string | null) => (c === "CIB" ? "Complete" : (c ?? ""));
 
 // PriceCharting returns loose/CIB/new prices; pick the tier matching the game's
 // condition (Sealed→new, CIB→cib, Loose→loose). Falls back across tiers if the
@@ -779,7 +781,7 @@ function DetailView({ game, userById, currentUser, onProgress, onClose, onEdit }
   const g = game;
   const tint = tintFor(g.platform);
   const addedByUser = userById(g.added_by);
-  const facts: [string, any][] = [["Developer", g.developer || "—"], ["Publisher", g.publisher || "—"], ["Released", g.year || "—"], ["Genre", g.genre || "—"], ["Condition", g.condition || "—"], ["Region", g.region || "—"]];
+  const facts: [string, any][] = [["Developer", g.developer || "—"], ["Publisher", g.publisher || "—"], ["Released", g.year || "—"], ["Genre", g.genre || "—"], ["Condition", conditionLabel(g.condition) || "—"], ["Region", g.region || "—"]];
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", zIndex: 60, display: "flex", alignItems: "flex-end", justifyContent: "center" }} className="fade">
       <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "94vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
@@ -886,7 +888,6 @@ function DetailView({ game, userById, currentUser, onProgress, onClose, onEdit }
             </div>
           </div>
 
-          {g.notes && <div style={{ marginTop: 18 }}><div style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", marginBottom: 6 }}>NOTES</div><div style={{ fontSize: 14, lineHeight: 1.55, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: "12px 14px" }}>{g.notes}</div></div>}
           {addedByUser && <div style={{ marginTop: 20, paddingTop: 14, borderTop: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 9 }}><Avatar user={addedByUser} size={22} /><span style={{ fontSize: 12, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>Added by {addedByUser.name}</span></div>}
         </div>
       </div>
@@ -1055,7 +1056,7 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
     title: game.title || "", platform: game.platform || platforms[0] || "PS1", status: game.status || "owned",
     condition: seedCondition, region: game.region || "PAL", genre: game.genre || genres[0] || "RPG",
     value_eur: seedValueEur,
-    notes: game.notes || "", cover: game.cover || "", year: game.year || "",
+    cover: game.cover || "", year: game.year || "",
     developer: game.developer || "", publisher: game.publisher || "", description: game.description || "",
     rating: game.rating ?? null, screenshots: game.screenshots || [], hltb: game.hltb || null,
     igdb_id: game.igdb_id ?? null, pricecharting_id: game.pricecharting_id ?? null, upc: game.upc ?? null, id: game.id,
@@ -1090,6 +1091,9 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
     // fresh session (0h); switching back restores the finished run's hours so a
     // toggle doesn't silently wipe them before save.
     if (myProg.status === "finished") set("myHours", k === "playing" ? "" : (myProg.hours ?? ""));
+    // At creation the hours field only shows for playing/finished — clear any typed
+    // value when switching to a status that hides it, so it isn't saved.
+    else if (isNew && k !== "playing" && k !== "finished") set("myHours", "");
     set("myStatus", k);
   };
 
@@ -1201,7 +1205,7 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
       region: f.region, genre: f.genre, year: Number(f.year) || null, developer: f.developer,
       publisher: f.publisher, rating: f.rating == null ? null : Number(f.rating),
       value_cents: (Number(f.value_eur) || 0) * 100, cover: f.cover, description: f.description,
-      screenshots: f.screenshots, hltb: f.hltb, notes: f.notes, igdb_id: f.igdb_id, pricecharting_id: f.pricecharting_id ?? null,
+      screenshots: f.screenshots, hltb: f.hltb, igdb_id: f.igdb_id, pricecharting_id: f.pricecharting_id ?? null,
       myStatus: f.status === "owned" ? f.myStatus : undefined, myHours: Number(f.myHours) || 0,
     });
   };
@@ -1211,10 +1215,10 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
   const Field = ({ label, children }: any) => <div><label style={lbl}>{label}</label>{children}</div>;
   // Native select with the browser arrow suppressed, plus our own chevron padded
   // in from the right edge so it isn't jammed against the border.
-  const Select = ({ value, opts, onChange }: any) => (
+  const Select = ({ value, opts, onChange, labelFor }: any) => (
     <div style={{ position: "relative" }}>
       <select value={value} onChange={(e) => onChange(e.target.value)} style={{ ...inp, cursor: "pointer", appearance: "none", WebkitAppearance: "none", MozAppearance: "none", paddingRight: 34 }}>
-        {opts.map((o: string) => <option key={o} value={o}>{o}</option>)}
+        {opts.map((o: string) => <option key={o} value={o}>{labelFor ? labelFor(o) : o}</option>)}
       </select>
       <ChevronDown size={16} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--ink-dim)" }} />
     </div>
@@ -1318,41 +1322,32 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
                 New playthrough — your finished run ({myProg.hours}h) will be saved to history.
               </div>
             )}
-            <label style={lbl}>YOUR HOURS PLAYED{startingReplay && " · NEW SESSION"}</label>
-            <input style={inp} type="number" value={f.myHours} onChange={(e) => set("myHours", e.target.value)} placeholder="0" />
+            {(!isNew || f.myStatus === "playing" || f.myStatus === "finished") && (
+              <>
+                <label style={lbl}>YOUR HOURS PLAYED{startingReplay && " · NEW SESSION"}</label>
+                <input style={inp} type="number" value={f.myHours} onChange={(e) => set("myHours", e.target.value)} placeholder="0" />
+              </>
+            )}
+          </div>
+        )}
+
+        {f.myStatus === "finished" && (
+          <div style={{ marginBottom: 14 }}>
+            <Field label="RATING"><div style={{ paddingTop: 4 }}><StarRating value={f.rating == null ? null : Number(f.rating)} onChange={(r) => set("rating", r)} /></div></Field>
           </div>
         )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
           <Field label="PLATFORM"><Select value={f.platform} opts={platforms} onChange={(v: string) => set("platform", v)} /></Field>
-          <Field label="CONDITION"><Select value={f.condition} opts={CONDITIONS} onChange={(v: string) => {
+          <Field label="CONDITION"><Select value={f.condition} opts={CONDITIONS} labelFor={conditionLabel} onChange={(v: string) => {
             set("condition", v);
             // If FILL fetched prices, re-derive the value for the new condition.
             if (priceTiers) { const cents = tierForCondition(priceTiers, v); if (cents != null) set("value_eur", Math.round(cents / 100)); }
           }} /></Field>
-          <Field label="REGION"><Select value={f.region} opts={REGIONS} onChange={(v: string) => set("region", v)} /></Field>
-          <Field label="GENRE"><Select value={f.genre} opts={genres} onChange={(v: string) => set("genre", v)} /></Field>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 14 }}>
-          <Field label="DEVELOPER"><input style={inp} value={f.developer} onChange={(e) => set("developer", e.target.value)} placeholder="Konami" /></Field>
-          <Field label="PUBLISHER"><input style={inp} value={f.publisher} onChange={(e) => set("publisher", e.target.value)} placeholder="Square Enix" /></Field>
-          <Field label="YEAR"><input style={inp} type="number" value={f.year} onChange={(e) => set("year", e.target.value)} placeholder="1998" /></Field>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 12, marginBottom: 14 }}>
-          <Field label="RATING"><div style={{ paddingTop: 4 }}><StarRating value={f.rating == null ? null : Number(f.rating)} onChange={(r) => set("rating", r)} /></div></Field>
-          <Field label="VALUE (€)"><input style={inp} type="number" value={f.value_eur} onChange={(e) => set("value_eur", e.target.value)} placeholder="0" /></Field>
         </div>
 
         <div style={{ marginBottom: 14 }}>
-          <label style={lbl}>DESCRIPTION</label>
-          <textarea style={{ ...inp, resize: "vertical", minHeight: 64 }} value={f.description} onChange={(e) => set("description", e.target.value)} placeholder="What's this game about?" />
-        </div>
-
-        <div style={{ marginBottom: 20 }}>
-          <label style={lbl}>NOTES</label>
-          <textarea style={{ ...inp, resize: "vertical", minHeight: 58 }} value={f.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Optional…" />
+          <Field label="VALUE (€)"><input style={inp} type="number" value={f.value_eur} onChange={(e) => set("value_eur", e.target.value)} placeholder="0" /></Field>
         </div>
 
         <div style={{ display: "flex", gap: 10 }}>

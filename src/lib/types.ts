@@ -91,7 +91,6 @@ export interface Game {
   description?: string | null;
   screenshots?: string[];
   hltb?: { main: number | null; extra: number | null; complete: number | null } | null;
-  notes?: string | null;
   igdb_id?: number | null;
   pricecharting_id?: string | null;
   added_by?: string | null;
