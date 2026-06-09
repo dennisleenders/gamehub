@@ -18,7 +18,7 @@ import { Avatar, AvatarPickerModal } from "@/components/Avatar";
 import { avatarSrc } from "@/lib/avatars";
 import {
   type Game, type Profile, type PlayStatus, type UpcomingGame, PLAY_STATUS, PLATFORM_TINT,
-  CONDITIONS, OVERVIEW_SECTIONS, money, fmtDate,
+  CONDITIONS, PLATFORMS, OVERVIEW_SECTIONS, money, fmtDate,
 } from "@/lib/types";
 
 const FALLBACK_TINTS = ["#9b8cff", "#6fc7b3", "#e6b667", "#e0738a", "#7fb2ff", "#c98cff"];
@@ -52,7 +52,7 @@ const abandonersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status 
 
 export default function VaultApp({ currentUser }: { currentUser: Profile }) {
   const uid = currentUser.id;
-  const { games, profiles, challenges, platforms, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences, saveProfile } = useVault(uid);
+  const { games, profiles, challenges, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences, saveProfile } = useVault(uid);
   const userById = (id?: string | null) => profiles.find((p) => p.id === id) || null;
 
   // Live current profile (reflects reloads after saving prefs); falls back to the
@@ -127,7 +127,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
     .sort((a, b) => (b.p!.updated_at! < a.p!.updated_at! ? -1 : 1))
     .map((x) => ({ g: x.g, p: x.p! }));
 
-  const byPlatform = platforms.map((p) => ({ p, count: owned.filter((g) => g.platform === p).length }))
+  const byPlatform = PLATFORMS.map((p) => ({ p, count: owned.filter((g) => g.platform === p).length }))
     .filter((x) => x.count).sort((a, b) => b.count - a.count);
   const maxCount = Math.max(1, ...byPlatform.map((x) => x.count));
   const recent = [...games];
@@ -318,7 +318,7 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
               <FilterField label="Library" value={status} onChange={setStatus} options={[["all", "All games"], ["owned", "Owned"], ["wishlist", "Wishlist"]]} />
               <FilterField label="Player" value={playerFilter} onChange={setPlayerFilter} options={[["all", "Any player"], ...profiles.map((a) => [a.id, a.name] as [string, string])]} />
               <FilterField label="Played" value={playFilter} onChange={setPlayFilter} options={[["all", "Any status"], ["playing", "Playing"], ["finished", "Finished"], ["backlog", "Backlog"], ["abandoned", "Abandoned"]]} />
-              <FilterField label="System" value={platform} onChange={setPlatform} options={[["all", "All systems"], ...platforms.map((p) => [p, p] as [string, string])]} />
+              <FilterField label="System" value={platform} onChange={setPlatform} options={[["all", "All systems"], ...PLATFORMS.map((p) => [p, p] as [string, string])]} />
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "14px 2px 16px", gap: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
@@ -387,13 +387,13 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
           onAdd={(payload) => saveGame(payload)} />
       )}
       {editing !== null && (
-        <GameModal game={editing} currentUser={currentUser} platforms={platforms} genres={genres} priceEnabled={priceChartingEnabled}
+        <GameModal game={editing} currentUser={currentUser} genres={genres} priceEnabled={priceChartingEnabled}
           onClose={() => setEditing(null)}
           onSave={async (g) => { await saveGame(g); setEditing(null); }}
           onDelete={async (id) => { await deleteGame(id); setEditing(null); setDetail(null); }} />
       )}
       {settingsOpen && (
-        <SettingsModal games={games} platforms={platforms} preferences={me.preferences} priceEnabled={priceChartingEnabled} priceTokenSet={priceChartingTokenSet}
+        <SettingsModal preferences={me.preferences} priceEnabled={priceChartingEnabled} priceTokenSet={priceChartingTokenSet}
           onSave={saveSettings} onSavePreferences={savePreferences} onClose={() => setSettingsOpen(false)} />
       )}
       {creatingChallenge && (
@@ -1042,7 +1042,7 @@ function StarRating({ value, onChange, size = 26 }: { value: number | null; onCh
   );
 }
 
-function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave, onDelete, onClose }: { game: GameSeed; currentUser: Profile; platforms: string[]; genres: string[]; priceEnabled: boolean; onSave: (g: any) => void; onDelete: (id: string) => void; onClose: () => void }) {
+function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, onClose }: { game: GameSeed; currentUser: Profile; genres: string[]; priceEnabled: boolean; onSave: (g: any) => void; onDelete: (id: string) => void; onClose: () => void }) {
   useBodyScrollLock();
   const isNew = !game.id;
   const myProg = getProg(game as Game, currentUser.id);
@@ -1053,7 +1053,7 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
     ? Math.round((tierForCondition(game.priceTiers, seedCondition) ?? 0) / 100) || ""
     : game.value_cents ? Math.round(game.value_cents / 100) : "";
   const [f, setF] = useState<any>({
-    title: game.title || "", platform: game.platform || platforms[0] || "PS1", status: game.status || "owned",
+    title: game.title || "", platform: game.platform || PLATFORMS[0] || "PS1", status: game.status || "owned",
     condition: seedCondition, region: game.region || "PAL", genre: game.genre || genres[0] || "RPG",
     value_eur: seedValueEur,
     cover: game.cover || "", year: game.year || "",
@@ -1338,7 +1338,7 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
         )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
-          <Field label="PLATFORM"><Select value={f.platform} opts={platforms} onChange={(v: string) => set("platform", v)} /></Field>
+          <Field label="PLATFORM"><Select value={f.platform} opts={PLATFORMS} onChange={(v: string) => set("platform", v)} /></Field>
           <Field label="CONDITION"><Select value={f.condition} opts={CONDITIONS} labelFor={conditionLabel} onChange={(v: string) => {
             set("condition", v);
             // If FILL fetched prices, re-derive the value for the new condition.
@@ -1359,9 +1359,9 @@ function GameModal({ game, currentUser, platforms, genres, priceEnabled, onSave,
   );
 }
 
-function SettingsModal({ games, platforms, preferences, priceEnabled, priceTokenSet, onSave, onSavePreferences, onClose }: {
-  games: Game[]; platforms: string[]; preferences: Profile["preferences"]; priceEnabled: boolean; priceTokenSet: boolean;
-  onSave: (key: "platforms" | "pricecharting_enabled" | "pricecharting_token", value: string[] | boolean | string) => void;
+function SettingsModal({ preferences, priceEnabled, priceTokenSet, onSave, onSavePreferences, onClose }: {
+  preferences: Profile["preferences"]; priceEnabled: boolean; priceTokenSet: boolean;
+  onSave: (key: "pricecharting_enabled" | "pricecharting_token", value: boolean | string) => void;
   onSavePreferences: (preferences: Profile["preferences"]) => void;
   onClose: () => void;
 }) {
@@ -1372,65 +1372,18 @@ function SettingsModal({ games, platforms, preferences, priceEnabled, priceToken
   const lbl: React.CSSProperties = { fontSize: 10, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, marginBottom: 8, display: "block" };
   const inp: React.CSSProperties = { flex: 1, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", color: "var(--ink)", padding: "10px 12px", fontSize: 14, fontFamily: "var(--body)", outline: "none", boxSizing: "border-box" };
 
-  // One editable list (platforms or genres), persisted on every change. Items
-  // still attached to games can't be removed — that would orphan the value in
-  // the dropdowns and stats.
-  const EditableList = ({ title, icon: Ic, items, field, usedCount }: {
-    title: string; icon: any; items: string[]; field: "platforms"; usedCount: (v: string) => number;
-  }) => {
-    const [draft, setDraft] = useState("");
-    const add = () => {
-      const v = draft.trim();
-      if (!v || items.some((i) => i.toLowerCase() === v.toLowerCase())) { setDraft(""); return; }
-      onSave(field, [...items, v]);
-      setDraft("");
-    };
-    const remove = (v: string) => onSave(field, items.filter((i) => i !== v));
-    return (
-      <div style={{ marginBottom: 22 }}>
-        <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 6 }}><Ic size={12} />{title}</label>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-          {items.map((v) => {
-            const n = usedCount(v);
-            return (
-              <span key={v} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 6px 6px 11px", borderRadius: 99, border: "1px solid var(--line)", background: "var(--bg)", fontSize: 12.5, fontFamily: "var(--display)", fontWeight: 700 }}>
-                {v}
-                {n > 0 && <span style={{ fontSize: 10, color: "var(--ink-dim)" }}>{n}</span>}
-                <button onClick={() => remove(v)} disabled={n > 0} title={n > 0 ? `In use by ${n} game${n === 1 ? "" : "s"}` : "Remove"}
-                  style={{ display: "grid", placeItems: "center", width: 19, height: 19, padding: 0, lineHeight: 0, borderRadius: 99, border: "none", cursor: n > 0 ? "not-allowed" : "pointer", background: n > 0 ? "transparent" : "var(--panel-alt)", color: n > 0 ? "var(--ink-dim)" : "var(--ink)", opacity: n > 0 ? 0.4 : 1 }}>
-                  <X size={12} />
-                </button>
-              </span>
-            );
-          })}
-          {!items.length && <span style={{ fontSize: 12, color: "var(--ink-dim)" }}>Nothing yet — add one below.</span>}
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input style={inp} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} placeholder={`Add ${title.toLowerCase().replace(/s$/, "")}…`} />
-          <button onClick={add} disabled={!draft.trim()} style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "0 14px", border: "none", borderRadius: "var(--radius)", cursor: draft.trim() ? "pointer" : "not-allowed", background: "var(--accent2)", color: "var(--bg)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 12, opacity: draft.trim() ? 1 : 0.5 }}>
-            <Plus size={15} strokeWidth={3} /> ADD
-          </button>
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} className="fade">
       <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "94vh", overflowY: "auto", overflowX: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
           <div style={{ fontFamily: "var(--display)", fontSize: 16, color: "var(--accent)" }}>SETTINGS</div>
           <button onClick={onClose} style={{ display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><X size={16} /></button>
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--ink-dim)", lineHeight: 1.5, marginBottom: 20 }}>
-          Curate the platforms shared across your household. Changes save instantly.
-        </div>
-        <EditableList title="Platforms" icon={Gamepad2} items={platforms} field="platforms" usedCount={(v) => games.filter((g) => g.platform === v).length} />
 
-        <div style={{ borderTop: "1px solid var(--line)", paddingTop: 18, marginBottom: 22 }}>
+        <div style={{ marginBottom: 22 }}>
           <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}><Tag size={12} />Pricing</label>
           <div style={{ fontSize: 11.5, color: "var(--ink-dim)", lineHeight: 1.5, marginBottom: 12 }}>
-            Shared with your household. When on, FILL also fetches a market value from the paid PriceCharting API (converted to € at the live rate) and picks the price matching each game&apos;s condition. Turn it off when you&apos;re not subscribed — values then stay manual.
+            Shared with your household. When on, auto-filling a game also fetches a market value from the paid PriceCharting API (converted to € at the live rate) and picks the price matching its condition. Turn it off when you&apos;re not subscribed — values then stay manual.
           </div>
           <button role="switch" aria-checked={priceEnabled} onClick={() => onSave("pricecharting_enabled", !priceEnabled)}
             style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 14px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", cursor: "pointer", color: "var(--ink)", textAlign: "left" }}>

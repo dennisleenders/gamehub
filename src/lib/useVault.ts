@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { DEFAULT_PLATFORMS, DEFAULT_GENRES } from "@/lib/types";
+import { DEFAULT_GENRES } from "@/lib/types";
 import type { Game, Profile, PlayStatus, Challenge } from "@/lib/types";
 
 // Central data layer. Replaces the PoC's in-memory state + window.storage with
@@ -15,7 +15,6 @@ export function useVault(currentUserId: string) {
   // Shared, household-wide challenges. Only the definitions live in the DB;
   // each user's progress is derived client-side from completions.
   const [challenges, setChallenges] = useState<Challenge[]>([]);
-  const [platforms, setPlatforms] = useState<string[]>(DEFAULT_PLATFORMS);
   // Genres are a fixed, app-defined list — not user-editable.
   const genres = DEFAULT_GENRES;
   // Shared feature flag: whether FILL also fetches prices from the paid
@@ -58,7 +57,6 @@ export function useVault(currentUserId: string) {
     // if the table is empty or hasn't been migrated yet.
     const byKey: Record<string, any> = {};
     (settings ?? []).forEach((s: any) => { byKey[s.key] = s.value; });
-    setPlatforms(Array.isArray(byKey.platforms) && byKey.platforms.length ? byKey.platforms : DEFAULT_PLATFORMS);
     setPriceChartingEnabled(byKey.pricecharting_enabled === true);
     setPriceChartingTokenSet((tokenCount ?? 0) > 0);
     setLoading(false);
@@ -142,11 +140,11 @@ export function useVault(currentUserId: string) {
     await load();
   }, [supabase, load]);
 
-  // Persist a shared setting: the editable platforms list, the PriceCharting
-  // feature flag, or the PriceCharting token. All live in the app_settings store.
-  // An empty token deletes its row so the "token saved" status stays accurate.
+  // Persist a shared setting: the PriceCharting feature flag or its token. Both
+  // live in the app_settings store. An empty token deletes its row so the "token
+  // saved" status stays accurate.
   const saveSettings = useCallback(
-    async (key: "platforms" | "pricecharting_enabled" | "pricecharting_token", value: string[] | boolean | string) => {
+    async (key: "pricecharting_enabled" | "pricecharting_token", value: boolean | string) => {
       if (key === "pricecharting_token" && (typeof value !== "string" || value.trim() === "")) {
         await supabase.from("app_settings").delete().eq("key", key);
       } else {
@@ -171,5 +169,5 @@ export function useVault(currentUserId: string) {
     await load();
   }, [supabase, currentUserId, load]);
 
-  return { games, profiles, challenges, platforms, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences, saveProfile, reload: load };
+  return { games, profiles, challenges, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences, saveProfile, reload: load };
 }

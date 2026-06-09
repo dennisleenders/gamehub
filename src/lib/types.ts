@@ -106,7 +106,24 @@ export interface Game {
 // logged-in profile picker.
 export const PROFILE_COLORS = ["#6fc7b3", "#e0738a", "#e6b667", "#7fb2ff", "#c98cff", "#7fd98a"];
 
-export const DEFAULT_PLATFORMS = ["PS1", "PS2", "PS3", "PS4", "PS5", "DS", "3DS"];
+// The fixed, app-wide list of platforms. This is the single source for every
+// platform selector/filter — it is intentionally NOT user-editable. To add or
+// rename a system, edit this list. (PS1–PS5/DS/3DS keep their original labels so
+// existing games stay matched.)
+export const PLATFORMS = [
+  // PlayStation
+  "PS1", "PS2", "PS3", "PS4", "PS5", "PSP", "PS Vita",
+  // Nintendo — home
+  "NES", "SNES", "N64", "GameCube", "Wii", "Wii U", "Switch", "Switch 2",
+  // Nintendo — handheld
+  "Game Boy", "Game Boy Color", "Game Boy Advance", "DS", "3DS",
+  // Xbox
+  "Xbox", "Xbox 360", "Xbox One", "Xbox Series",
+  // Sega
+  "Master System", "Mega Drive", "Saturn", "Dreamcast", "Game Gear",
+  // Other
+  "PC", "Atari 2600", "Neo Geo", "TurboGrafx-16",
+];
 export const CONDITIONS = ["Sealed", "CIB", "Loose"];
 export const REGIONS = ["PAL", "NTSC-U", "NTSC-J"];
 export const DEFAULT_GENRES = ["RPG", "Action", "Platformer", "Horror", "Strategy", "Adventure"];
