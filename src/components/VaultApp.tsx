@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search, Plus, X, Gamepad2, Trophy, Heart, Disc, LayoutGrid, Sparkles, Check, Box, CircleUser,
   ChevronLeft, ChevronDown, Pencil, Loader2, ImageIcon, Wand2, Library, Joystick,
-  ScanLine, Settings, LogOut, Clock, Tag, Star, CalendarClock,
+  ScanLine, Settings, LogOut, Clock, Tag, Star, CalendarClock, Play, Minus,
 } from "lucide-react";
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
@@ -374,7 +374,9 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
         </div>
       </nav>
 
-      {liveDetail && <DetailView game={liveDetail} userById={userById} onClose={() => setDetail(null)} onEdit={() => setEditing(liveDetail)} />}
+      {liveDetail && <DetailView game={liveDetail} userById={userById} currentUser={me}
+        onProgress={(status, hours) => saveGame({ id: liveDetail.id, status: "owned", myStatus: status, myHours: hours })}
+        onClose={() => setDetail(null)} onEdit={() => setEditing(liveDetail)} />}
       {upcomingDetail && (
         <UpcomingDetail
           g={upcomingDetail}
@@ -704,7 +706,75 @@ function Screenshots({ shots }: { shots?: string[] | null }) {
   );
 }
 
-function DetailView({ game, userById, onClose, onEdit }: { game: Game; userById: (id?: string | null) => Profile | null; onClose: () => void; onEdit: () => void }) {
+// Quick play-status actions on the detail sheet for a game you own. Not playing
+// → a one-tap "start playing" (a fresh replay when the saved run is finished,
+// resume when abandoned). Playing → nudge your hours so the progress bar moves,
+// or finish/abandon the run. Everything writes through the same saveGame path as
+// the editor, so replay archiving stays consistent.
+function ProgressActions({ g, currentUser, onProgress }: { g: Game; currentUser: Profile; onProgress: (status: PlayStatus, hours: number) => Promise<void> }) {
+  const myProg = getProg(g, currentUser.id);
+  const [hours, setHours] = useState<number>(myProg.hours);
+  const [busy, setBusy] = useState(false);
+  // Re-sync the editable value whenever the saved hours change (after our own
+  // save + reload, or a partner editing on another device).
+  useEffect(() => { setHours(myProg.hours); }, [myProg.hours]);
+
+  const run = async (status: PlayStatus, h: number) => {
+    setBusy(true);
+    try { await onProgress(status, Math.max(0, Math.round(h))); } finally { setBusy(false); }
+  };
+
+  if (myProg.status !== "playing") {
+    const label = myProg.status === "finished" ? "PLAY AGAIN" : myProg.status === "abandoned" ? "RESUME PLAYING" : "START PLAYING";
+    // A replay starts a fresh session at 0h (saveGame archives the finished run);
+    // resuming an abandoned run keeps its hours.
+    const startHours = myProg.status === "finished" ? 0 : myProg.hours;
+    return (
+      <button onClick={() => run("playing", startHours)} disabled={busy} style={{ marginTop: 18, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "13px 0", border: "none", borderRadius: "var(--radius)", cursor: busy ? "default" : "pointer", background: "var(--accent2)", color: "var(--bg)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 13, opacity: busy ? 0.6 : 1 }}>
+        {busy ? <Loader2 size={16} className="spin" /> : <Play size={16} />} {label}
+      </button>
+    );
+  }
+
+  const target = g.hltb?.main || null;
+  const pct = target ? Math.min(100, Math.round((hours / target) * 100)) : null;
+  const dirty = hours !== myProg.hours;
+  const stepBtn: React.CSSProperties = { display: "grid", placeItems: "center", width: 38, height: 38, flexShrink: 0, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", color: "var(--ink)", padding: 0 };
+
+  return (
+    <div style={{ marginTop: 18, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <span style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>YOUR PROGRESS</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, fontFamily: "var(--display)", color: "var(--accent2)" }}>
+          <span className="pulse" style={{ width: 7, height: 7, borderRadius: 99, background: "var(--accent2)" }} /> PLAYING
+        </span>
+      </div>
+
+      {target && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ height: 6, background: "var(--panel)", borderRadius: 99, overflow: "hidden", border: "1px solid var(--line)" }}>
+            <div style={{ height: "100%", width: `${pct}%`, background: currentUser.color, borderRadius: 99, transition: "width .2s" }} />
+          </div>
+          <div style={{ fontSize: 10.5, color: "var(--ink-dim)", fontFamily: "var(--display)", marginTop: 6 }}>{hours}h / {target}h main story · {pct}%</div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <button onClick={() => setHours((h) => Math.max(0, h - 1))} disabled={busy || hours <= 0} style={{ ...stepBtn, cursor: busy || hours <= 0 ? "default" : "pointer", opacity: busy || hours <= 0 ? 0.5 : 1 }}><Minus size={16} /></button>
+        <input type="number" min={0} value={hours} onChange={(e) => setHours(Math.max(0, Number(e.target.value) || 0))} style={{ flex: 1, minWidth: 0, textAlign: "center", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", color: "var(--ink)", padding: "10px 12px", fontSize: 15, fontFamily: "var(--display)", fontWeight: 700, outline: "none", boxSizing: "border-box" }} />
+        <button onClick={() => setHours((h) => h + 1)} disabled={busy} style={{ ...stepBtn, cursor: busy ? "default" : "pointer", opacity: busy ? 0.5 : 1 }}><Plus size={16} /></button>
+        <button onClick={() => run("playing", hours)} disabled={busy || !dirty} style={{ flexShrink: 0, padding: "0 16px", height: 38, borderRadius: "var(--radius)", cursor: busy || !dirty ? "default" : "pointer", background: dirty ? "var(--accent2)" : "var(--panel)", color: dirty ? "var(--bg)" : "var(--ink-dim)", border: dirty ? "none" : "1px solid var(--line)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 12 }}>{busy ? <Loader2 size={14} className="spin" /> : "UPDATE"}</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={() => run("finished", hours)} disabled={busy} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "11px 0", border: "1px solid var(--good)", borderRadius: "var(--radius)", cursor: busy ? "default" : "pointer", background: "var(--good)1a", color: "var(--good)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 12, opacity: busy ? 0.6 : 1 }}><Check size={15} strokeWidth={3} /> FINISH</button>
+        <button onClick={() => run("abandoned", hours)} disabled={busy} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "11px 0", border: "1px solid var(--bad)", borderRadius: "var(--radius)", cursor: busy ? "default" : "pointer", background: "var(--bad)1a", color: "var(--bad)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 12, opacity: busy ? 0.6 : 1 }}><X size={15} strokeWidth={3} /> ABANDON</button>
+      </div>
+    </div>
+  );
+}
+
+function DetailView({ game, userById, currentUser, onProgress, onClose, onEdit }: { game: Game; userById: (id?: string | null) => Profile | null; currentUser: Profile; onProgress: (status: PlayStatus, hours: number) => Promise<void>; onClose: () => void; onEdit: () => void }) {
   useBodyScrollLock();
   const g = game;
   const tint = tintFor(g.platform);
@@ -730,6 +800,8 @@ function DetailView({ game, userById, onClose, onEdit }: { game: Game; userById:
               </div>
             </div>
           </div>
+
+          {g.status === "owned" && <ProgressActions g={g} currentUser={currentUser} onProgress={onProgress} />}
 
           {g.description && <div style={{ marginTop: 20 }}><div style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", marginBottom: 7 }}>ABOUT</div><p style={{ fontSize: 14.5, lineHeight: 1.6, margin: 0 }}>{g.description}</p></div>}
 
