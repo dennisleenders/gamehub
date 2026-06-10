@@ -26,8 +26,8 @@ const hashIdx = (s = "", n = 1) => { let h = 0; for (let i = 0; i < s.length; i+
 const tintFor = (p: string) => PLATFORM_TINT[p] || FALLBACK_TINTS[hashIdx(p, FALLBACK_TINTS.length)];
 const playColor = (k: string) => k === "playing" ? "var(--accent2)" : k === "finished" ? "var(--good)" : k === "abandoned" ? "var(--bad)" : "var(--ink-dim)";
 const getProg = (g: Game, uid?: string) => (uid && g.progress?.[uid]) || { status: "backlog" as PlayStatus, hours: 0 };
-// "CIB" is kept as the stored/logic value but shown as "Complete" in the UI.
-const conditionLabel = (c?: string | null) => (c === "CIB" ? "Complete" : (c ?? ""));
+// Condition is shown verbatim (Sealed / CIB / Loose) — the stored value is the label.
+const conditionLabel = (c?: string | null) => c ?? "";
 
 // PriceCharting returns loose/CIB/new prices; pick the tier matching the game's
 // condition (Sealed→new, CIB→cib, Loose→loose). Falls back across tiers if the
@@ -600,7 +600,7 @@ function HeroSlide({ g, hours, player, currentUser, onOpen }: { g: Game; hours: 
         {showArt ? <img src={g.cover!} alt={g.title} onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontFamily: "var(--display)", fontSize: 96, color: tint, opacity: .5 }}>{(g.title || "?")[0]}</span>}
       </div>
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "linear-gradient(to top, #13111a 0%, rgba(19,17,26,0.82) 34%, rgba(19,17,26,0.12) 64%, rgba(19,17,26,0.28) 100%)" }} />
-      <div style={{ position: "absolute", top: "calc(86px + env(safe-area-inset-top))", left: 20, display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 12px 6px 9px", borderRadius: 99, background: "rgba(20,17,26,0.4)", backdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,0.14)" }}>
+      <div style={{ position: "absolute", top: "calc(74px + env(safe-area-inset-top))", left: 20, display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 12px 6px 9px", borderRadius: 99, background: "rgba(20,17,26,0.4)", backdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,0.14)" }}>
         <span className="pulse" style={{ width: 7, height: 7, borderRadius: 99, background: "var(--accent2)" }} />
         <span style={{ fontSize: 10.5, letterSpacing: 1.5, color: "#fff", fontFamily: "var(--display)", fontWeight: 700 }}>NOW PLAYING</span>
       </div>
@@ -784,8 +784,8 @@ function DetailView({ game, userById, currentUser, onProgress, onClose, onEdit }
   const facts: [string, any][] = [["Developer", g.developer || "—"], ["Publisher", g.publisher || "—"], ["Released", g.year || "—"], ["Genre", g.genre || "—"], ["Condition", conditionLabel(g.condition) || "—"], ["Region", g.region || "—"]];
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", zIndex: 60, display: "flex", alignItems: "flex-end", justifyContent: "center" }} className="fade">
-      <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "94vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
-        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "calc(14px + env(safe-area-inset-top)) 16px 14px", background: "var(--panel)", borderBottom: "1px solid var(--line)" }}>
+      <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "calc(94vh - env(safe-area-inset-top))", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
+        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", background: "var(--panel)", borderBottom: "1px solid var(--line)" }}>
           <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)", fontFamily: "var(--display)", fontSize: 12, fontWeight: 700 }}><ChevronLeft size={17} /> BACK</button>
           <button onClick={onEdit} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)", fontFamily: "var(--display)", fontSize: 12, fontWeight: 700 }}><Pencil size={14} /> EDIT</button>
         </div>
@@ -953,8 +953,8 @@ function UpcomingDetail({ g, existingStatus, onClose, onAdd }: {
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", zIndex: 60, display: "flex", alignItems: "flex-end", justifyContent: "center" }} className="fade">
-      <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "94vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
-        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "calc(14px + env(safe-area-inset-top)) 16px 14px", background: "var(--panel)", borderBottom: "1px solid var(--line)" }}>
+      <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "calc(94vh - env(safe-area-inset-top))", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
+        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", background: "var(--panel)", borderBottom: "1px solid var(--line)" }}>
           <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)", fontFamily: "var(--display)", fontSize: 12, fontWeight: 700 }}><ChevronLeft size={17} /> BACK</button>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, fontFamily: "var(--display)", color: "var(--accent3)" }}><CalendarClock size={13} /> UPCOMING</span>
         </div>
@@ -1133,6 +1133,21 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
     } catch { setFetchState("empty"); }
   };
 
+  // A barcode scan opens this form pre-seeded with just a title (and maybe a
+  // price) from the UPC database — but no IGDB metadata. Run the same lookup the
+  // title typeahead uses so cover/developer/publisher/year/genre/HLTB fill in
+  // automatically, without the user having to re-pick the title. Once, on open,
+  // and only for a scan-seeded new entry (a manual "Add" has no upc).
+  const scanFilledRef = useRef(false);
+  useEffect(() => {
+    if (scanFilledRef.current) return;
+    if (isNew && game.upc && (game.title || "").trim() && !game.igdb_id) {
+      scanFilledRef.current = true;
+      void autoFill();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Debounced title typeahead. Fires only while the user is actively typing
   // (typingRef), min 2 chars. The box opens immediately in a "searching" state so
   // typing feels responsive; the actual request is debounced 300ms after the last
@@ -1226,7 +1241,7 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} className="fade">
-      <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "94vh", overflowY: "auto", overflowX: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: "calc(20px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom))" }}>
+      <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "calc(94vh - env(safe-area-inset-top))", overflowY: "auto", overflowX: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: "20px 20px calc(20px + env(safe-area-inset-bottom))" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
           <div style={{ fontFamily: "var(--display)", fontSize: 16, color: "var(--accent)" }}>{isNew ? "NEW ENTRY" : "EDIT"}</div>
           <button onClick={onClose} style={{ display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><X size={16} /></button>
@@ -1374,7 +1389,7 @@ function SettingsModal({ preferences, priceEnabled, priceTokenSet, onSave, onSav
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} className="fade">
-      <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "94vh", overflowY: "auto", overflowX: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: "calc(20px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom))" }}>
+      <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "calc(94vh - env(safe-area-inset-top))", overflowY: "auto", overflowX: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: "20px 20px calc(20px + env(safe-area-inset-bottom))" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
           <div style={{ fontFamily: "var(--display)", fontSize: 16, color: "var(--accent)" }}>SETTINGS</div>
           <button onClick={onClose} style={{ display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><X size={16} /></button>
@@ -1568,7 +1583,7 @@ function ScannerModal({ resolve, onResolved, onClose }: {
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000d", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 80 }} className="fade">
-      <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: "calc(20px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom))" }}>
+      <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: "20px 20px calc(20px + env(safe-area-inset-bottom))" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ fontFamily: "var(--display)", fontSize: 16, color: "var(--accent)" }}>SCAN BARCODE</div>
           <button onClick={onClose} style={{ display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><X size={16} /></button>
