@@ -47,11 +47,40 @@ export async function middleware(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
 
-  // Gate the app: unauthenticated users go to /login (except the login page itself).
-  if (!user && !request.nextUrl.pathname.startsWith("/login")) {
+  // Gate 1 — auth: unauthenticated users go to /login (except the login page).
+  // For an invite link (/join/<code>), carry the code through sign-in so a
+  // brand-new user lands back on the join flow afterwards.
+  if (!user && !pathname.startsWith("/login")) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
+    if (pathname.startsWith("/join/")) {
+      url.searchParams.set("invite", pathname.slice("/join/".length));
+    }
     return NextResponse.redirect(url);
+  }
+
+  // Gate 2 — household: a signed-in user who isn't in a vault yet must onboard
+  // first. /onboarding and /join (and /login) are exempt so the redirect can't
+  // loop; /api routes are exempt too (they authenticate themselves, and a
+  // redirected fetch/POST — e.g. sign-out — would silently break). The check is
+  // a cheap indexed count; the JWT could carry household_id later to skip it.
+  if (
+    user &&
+    !pathname.startsWith("/login") &&
+    !pathname.startsWith("/onboarding") &&
+    !pathname.startsWith("/join/") &&
+    !pathname.startsWith("/api/")
+  ) {
+    const { count } = await supabase
+      .from("household_members")
+      .select("user_id", { count: "exact", head: true })
+      .eq("user_id", user.sub);
+    if (!count) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/onboarding";
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
   }
 
   return response;

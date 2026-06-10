@@ -1,16 +1,22 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Joystick, Lock, UserPlus, AlertCircle, Loader2 } from "lucide-react";
+import { Joystick, Lock, UserPlus, AlertCircle, Loader2, MailCheck } from "lucide-react";
 import { AvatarGrid } from "@/components/Avatar";
 import { AVATARS } from "@/lib/avatars";
 import { PROFILE_COLORS } from "@/lib/types";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const supabase = createClient();
+  // Set when arriving via an invite link (/join/<code> → /login?invite=<code>).
+  // We carry it through sign-in so the user lands back on the join flow.
+  const invite = useSearchParams().get("invite") ?? "";
+  const dest = invite ? `/onboarding?invite=${encodeURIComponent(invite)}` : "/";
+  // True once a signup needs email confirmation (no session returned yet).
+  const [sent, setSent] = useState(false);
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
@@ -33,18 +39,25 @@ export default function LoginPage() {
         if (error) throw error;
       } else {
         if (!name.trim()) throw new Error("Choose a name.");
-        const { error } = await supabase.auth.signUp({
+        // If email confirmation is on, the link returns the user to the join/
+        // onboarding flow (with the invite preserved) rather than a bare app.
+        const emailRedirectTo = typeof window !== "undefined" ? `${window.location.origin}${dest}` : undefined;
+        const { data, error } = await supabase.auth.signUp({
           email, password: pass,
-          options: { data: { name: name.trim(), color, avatar } },
+          options: { data: { name: name.trim(), color, avatar }, emailRedirectTo },
         });
         if (error) throw error;
+        // Email confirmation on → no session yet. Don't redirect into a gated
+        // app they can't enter; ask them to confirm first.
+        if (!data.session) { setSent(true); setPhase("idle"); return; }
       }
       // Success — keep the button loading through the redirect (no flip back to
       // the default label). The session is persisted by Supabase and
-      // auto-refreshed by middleware — the "never log out" behaviour.
+      // auto-refreshed by middleware — the "never log out" behaviour. An invite
+      // routes via /onboarding so the join completes; otherwise straight in.
       setPhase("redirecting");
       router.refresh();
-      router.push("/");
+      router.push(dest);
     } catch (e: any) {
       setErr(e.message ?? "Something went wrong.");
       setPhase("idle");
@@ -70,11 +83,27 @@ export default function LoginPage() {
           </div>
           <div style={{ fontFamily: "var(--display)", fontSize: 22, letterSpacing: 1, fontWeight: 700 }}>GAMEVAULT</div>
           <div style={{ fontSize: 12, color: "var(--ink-dim)", fontFamily: "var(--display)", letterSpacing: 1, marginTop: 6 }}>
-            {mode === "login" ? "Welcome back" : "Create your player"}
+            {invite ? "Sign in to join the vault" : mode === "login" ? "Welcome back" : "Create your player"}
           </div>
         </div>
 
         <div style={{ background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 16, padding: 22 }}>
+          {sent ? (
+            <div style={{ textAlign: "center", padding: "8px 0 4px" }}>
+              <div style={{ width: 48, height: 48, display: "grid", placeItems: "center", margin: "0 auto 14px", background: "var(--good)", borderRadius: 14, color: "var(--bg)" }}>
+                <MailCheck size={26} strokeWidth={2.5} />
+              </div>
+              <div style={{ fontFamily: "var(--display)", fontSize: 15, fontWeight: 700, marginBottom: 8 }}>CHECK YOUR EMAIL</div>
+              <div style={{ fontSize: 12.5, color: "var(--ink-dim)", lineHeight: 1.6 }}>
+                We sent a confirmation link to <span style={{ color: "var(--ink)" }}>{email}</span>. Open it to finish setting up your account{invite ? " and join the vault" : ""}.
+              </div>
+              <button onClick={() => { setSent(false); setMode("login"); }}
+                style={{ marginTop: 18, background: "none", border: "none", cursor: "pointer", color: "var(--accent2)", fontSize: 12.5, fontFamily: "var(--display)", fontWeight: 700 }}>
+                ← Back to sign in
+              </button>
+            </div>
+          ) : (
+          <>
           {mode === "register" && (
             <>
               <label style={lbl}>YOUR NAME</label>
@@ -122,6 +151,8 @@ export default function LoginPage() {
               {mode === "login" ? "New here? Create a player" : "← Back to sign in"}
             </button>
           </div>
+          </>
+          )}
         </div>
 
         <div style={{ textAlign: "center", marginTop: 18, fontSize: 10.5, color: "var(--ink-dim)", fontFamily: "var(--display)", lineHeight: 1.6 }}>
@@ -129,5 +160,14 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// useSearchParams() must sit under a Suspense boundary in Next 15.
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div style={{ minHeight: "100vh" }} />}>
+      <LoginForm />
+    </Suspense>
   );
 }

@@ -2,6 +2,32 @@
 
 export type PlayStatus = "backlog" | "playing" | "finished" | "abandoned";
 
+// ---- HOUSEHOLDS (vaults) ---------------------------------------------------
+// A household is a self-contained vault. Each user belongs to exactly one. The
+// owner (its creator) can rename it, manage members, regenerate the invite code
+// and delete it; members can edit the shared collection.
+export type HouseholdRole = "owner" | "member";
+
+export interface Household {
+  id: string;
+  name: string;
+  invite_code: string;
+  created_by?: string | null;
+  created_at?: string;
+}
+
+export interface HouseholdMember {
+  household_id: string;
+  user_id: string;
+  role: HouseholdRole;
+  joined_at?: string;
+}
+
+// A membership joined to its profile for the member-management UI.
+export interface MemberWithProfile extends HouseholdMember {
+  profile?: Profile;
+}
+
 export interface Profile {
   id: string;
   name: string;

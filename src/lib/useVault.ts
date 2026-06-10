@@ -3,15 +3,21 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { DEFAULT_GENRES } from "@/lib/types";
-import type { Game, Profile, PlayStatus, Challenge } from "@/lib/types";
+import type { Game, Profile, PlayStatus, Challenge, MemberWithProfile } from "@/lib/types";
 
 // Central data layer. Replaces the PoC's in-memory state + window.storage with
 // live Supabase queries, while preserving the same shape the UI expects
 // (games carry a per-user `progress` map keyed by user id).
-export function useVault(currentUserId: string) {
+//
+// Everything is scoped to one household. RLS auto-scopes reads to the caller's
+// vault, so the SELECTs don't filter by household_id; but inserts must stamp it
+// (RLS `with check`), and realtime channels filter by it for efficiency.
+export function useVault(currentUserId: string, householdId: string) {
   const supabase = createClient();
   const [games, setGames] = useState<Game[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  // Members of this household joined to their profiles, for the member-management UI.
+  const [members, setMembers] = useState<MemberWithProfile[]>([]);
   // Shared, household-wide challenges. Only the definitions live in the DB;
   // each user's progress is derived client-side from completions.
   const [challenges, setChallenges] = useState<Challenge[]>([]);
@@ -27,7 +33,7 @@ export function useVault(currentUserId: string) {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const [{ data: gs }, { data: prog }, { data: profs }, { data: settings }, { data: runs }, { data: chals }, { count: tokenCount }] = await Promise.all([
+    const [{ data: gs }, { data: prog }, { data: profs }, { data: settings }, { data: runs }, { data: chals }, { data: mems }, { count: tokenCount }] = await Promise.all([
       supabase.from("games").select("*").order("created_at", { ascending: false }),
       supabase.from("progress").select("*"),
       supabase.from("profiles").select("*"),
@@ -35,6 +41,7 @@ export function useVault(currentUserId: string) {
       supabase.from("app_settings").select("*").neq("key", "pricecharting_token"),
       supabase.from("playthroughs").select("*"),
       supabase.from("challenges").select("*").order("created_at", { ascending: false }),
+      supabase.from("household_members").select("household_id, user_id, role, joined_at"),
       // Head/count query: tells us a token exists without fetching its value.
       supabase.from("app_settings").select("key", { count: "exact", head: true }).eq("key", "pricecharting_token"),
     ]);
@@ -53,6 +60,10 @@ export function useVault(currentUserId: string) {
     setGames((gs ?? []).map((g: any) => ({ ...g, progress: byGame[g.id] ?? {}, playthroughs: runsByGame[g.id] ?? {} })));
     setProfiles(profs ?? []);
     setChallenges(chals ?? []);
+    // Join memberships to their profiles for the member-management UI.
+    const profById: Record<string, Profile> = {};
+    (profs ?? []).forEach((p: any) => { profById[p.id] = p; });
+    setMembers((mems ?? []).map((m: any) => ({ ...m, profile: profById[m.user_id] })));
     // Settings are a small key/value store; fall back to the bundled defaults
     // if the table is empty or hasn't been migrated yet.
     const byKey: Record<string, any> = {};
@@ -64,20 +75,28 @@ export function useVault(currentUserId: string) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Realtime: when either table changes (e.g. your partner adds a game or
-  // updates their progress on another device), refresh.
+  // Realtime: when a household-scoped table changes (e.g. a member adds a game
+  // or updates progress on another device), refresh. Each channel is filtered to
+  // this household for efficiency (RLS is the actual isolation boundary — see
+  // 0016_realtime.sql). `profiles` has no household_id so it stays unfiltered;
+  // its SELECT is still RLS-scoped, so an unrelated change only triggers a
+  // harmless reload. `households`/`household_members` keep the vault name and
+  // member list live (owner sees a new member appear instantly).
   useEffect(() => {
+    const hh = `household_id=eq.${householdId}`;
     const ch = supabase
-      .channel("vault")
-      .on("postgres_changes", { event: "*", schema: "public", table: "games" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "progress" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "app_settings" }, load)
+      .channel(`vault:${householdId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "games", filter: hh }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "progress", filter: hh }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_settings", filter: hh }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "playthroughs", filter: hh }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "challenges", filter: hh }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "household_members", filter: hh }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "households", filter: `id=eq.${householdId}` }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "playthroughs" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "challenges" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [supabase, load]);
+  }, [supabase, load, householdId]);
 
   const saveGame = useCallback(async (g: Partial<Game> & { myStatus?: PlayStatus; myHours?: number }) => {
     const { id, progress, myStatus, myHours, ...fields } = g as any;
@@ -87,7 +106,7 @@ export function useVault(currentUserId: string) {
     } else {
       const { data } = await supabase
         .from("games")
-        .insert({ ...fields, added_by: currentUserId })
+        .insert({ ...fields, added_by: currentUserId, household_id: householdId })
         .select("id")
         .single();
       gameId = data?.id;
@@ -107,18 +126,19 @@ export function useVault(currentUserId: string) {
           await supabase.from("playthroughs").insert({
             game_id: gameId,
             user_id: currentUserId,
+            household_id: householdId,
             hours: existing.hours,
             finished_at: existing.updated_at ?? new Date().toISOString(),
           });
         }
       }
       await supabase.from("progress").upsert({
-        game_id: gameId, user_id: currentUserId,
+        game_id: gameId, user_id: currentUserId, household_id: householdId,
         status: myStatus, hours: myHours ?? 0,
       });
     }
     await load();
-  }, [supabase, currentUserId, load]);
+  }, [supabase, currentUserId, householdId, load]);
 
   const deleteGame = useCallback(async (id: string) => {
     await supabase.from("games").delete().eq("id", id);
@@ -131,9 +151,9 @@ export function useVault(currentUserId: string) {
   const saveChallenge = useCallback(async (c: Partial<Challenge>) => {
     const { id, ...fields } = c as any;
     if (id) await supabase.from("challenges").update(fields).eq("id", id);
-    else await supabase.from("challenges").insert({ ...fields, created_by: currentUserId });
+    else await supabase.from("challenges").insert({ ...fields, created_by: currentUserId, household_id: householdId });
     await load();
-  }, [supabase, currentUserId, load]);
+  }, [supabase, currentUserId, householdId, load]);
 
   const deleteChallenge = useCallback(async (id: string) => {
     await supabase.from("challenges").delete().eq("id", id);
@@ -146,13 +166,13 @@ export function useVault(currentUserId: string) {
   const saveSettings = useCallback(
     async (key: "pricecharting_enabled" | "pricecharting_token", value: boolean | string) => {
       if (key === "pricecharting_token" && (typeof value !== "string" || value.trim() === "")) {
-        await supabase.from("app_settings").delete().eq("key", key);
+        await supabase.from("app_settings").delete().eq("household_id", householdId).eq("key", key);
       } else {
-        await supabase.from("app_settings").upsert({ key, value });
+        await supabase.from("app_settings").upsert({ household_id: householdId, key, value }, { onConflict: "household_id,key" });
       }
       await load();
     },
-    [supabase, load],
+    [supabase, householdId, load],
   );
 
   // Persist the current user's personal preferences (overview layout, etc.).
@@ -169,5 +189,34 @@ export function useVault(currentUserId: string) {
     await load();
   }, [supabase, currentUserId, load]);
 
-  return { games, profiles, challenges, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences, saveProfile, reload: load };
+  // ---- Household management (owner unless noted) ---------------------------
+  // Rename the vault. RLS (households_update_owner) restricts this to the owner.
+  const renameVault = useCallback(async (name: string) => {
+    await supabase.from("households").update({ name: name.trim() }).eq("id", householdId);
+    await load();
+  }, [supabase, householdId, load]);
+
+  // Roll the invite code via RPC (server-side uniqueness + owner check). Returns
+  // the new code so the UI can show it without waiting for the realtime reload.
+  const regenerateInvite = useCallback(async (): Promise<string | null> => {
+    const { data, error } = await supabase.rpc("regenerate_invite_code", { p_household_id: householdId });
+    if (error) throw error;
+    await load();
+    return (data as string) ?? null;
+  }, [supabase, householdId, load]);
+
+  // Owner removes a member (RLS members_delete allows self-or-owner).
+  const removeMember = useCallback(async (userId: string) => {
+    await supabase.from("household_members").delete().eq("household_id", householdId).eq("user_id", userId);
+    await load();
+  }, [supabase, householdId, load]);
+
+  // Leave the vault (or, for a sole owner, delete it). The RPC handles owner
+  // succession and deleting an emptied vault.
+  const leaveVault = useCallback(async () => {
+    const { error } = await supabase.rpc("leave_household");
+    if (error) throw error;
+  }, [supabase]);
+
+  return { games, profiles, members, challenges, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences, saveProfile, renameVault, regenerateInvite, removeMember, leaveVault, reload: load };
 }

@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search, Plus, X, Gamepad2, Trophy, Heart, Disc, LayoutGrid, Sparkles, Check, Box, CircleUser,
-  ChevronLeft, ChevronDown, Pencil, Loader2, ImageIcon, Library, Joystick,
+  ChevronLeft, ChevronRight, ChevronDown, Pencil, Loader2, ImageIcon, Library, Joystick,
   ScanLine, Settings, LogOut, Clock, Tag, Star, CalendarClock, Play, Minus,
+  Home, Ticket, Copy, RefreshCw, Crown, UserMinus, Trash2, Users,
 } from "lucide-react";
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
@@ -17,7 +18,8 @@ import { useAchievementToasts } from "@/components/useAchievementToasts";
 import { Avatar, AvatarPickerModal } from "@/components/Avatar";
 import { avatarSrc } from "@/lib/avatars";
 import {
-  type Game, type Profile, type PlayStatus, type UpcomingGame, PLAY_STATUS, PLATFORM_TINT,
+  type Game, type Profile, type PlayStatus, type UpcomingGame, type Household, type HouseholdRole,
+  type MemberWithProfile, PLAY_STATUS, PLATFORM_TINT,
   CONDITIONS, PLATFORMS, OVERVIEW_SECTIONS, money, fmtDate,
 } from "@/lib/types";
 
@@ -50,9 +52,9 @@ const playersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status ===
 const finishersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status === "finished");
 const abandonersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status === "abandoned");
 
-export default function VaultApp({ currentUser }: { currentUser: Profile }) {
+export default function VaultApp({ currentUser, household, role }: { currentUser: Profile; household: Household; role: HouseholdRole }) {
   const uid = currentUser.id;
-  const { games, profiles, challenges, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences, saveProfile } = useVault(uid);
+  const { games, profiles, members, challenges, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences, saveProfile, renameVault, regenerateInvite, removeMember, leaveVault } = useVault(uid, household.id);
   const userById = (id?: string | null) => profiles.find((p) => p.id === id) || null;
 
   // Live current profile (reflects reloads after saving prefs); falls back to the
@@ -394,6 +396,8 @@ export default function VaultApp({ currentUser }: { currentUser: Profile }) {
       )}
       {settingsOpen && (
         <SettingsModal preferences={me.preferences} priceEnabled={priceChartingEnabled} priceTokenSet={priceChartingTokenSet}
+          household={household} role={role} members={members} currentUserId={uid}
+          onRenameVault={renameVault} onRegenerateInvite={regenerateInvite} onRemoveMember={removeMember} onLeaveVault={leaveVault}
           onSave={saveSettings} onSavePreferences={savePreferences} onClose={() => setSettingsOpen(false)} />
       )}
       {creatingChallenge && (
@@ -1374,8 +1378,13 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
   );
 }
 
-function SettingsModal({ preferences, priceEnabled, priceTokenSet, onSave, onSavePreferences, onClose }: {
+function SettingsModal({ preferences, priceEnabled, priceTokenSet, household, role, members, currentUserId, onRenameVault, onRegenerateInvite, onRemoveMember, onLeaveVault, onSave, onSavePreferences, onClose }: {
   preferences: Profile["preferences"]; priceEnabled: boolean; priceTokenSet: boolean;
+  household: Household; role: HouseholdRole; members: MemberWithProfile[]; currentUserId: string;
+  onRenameVault: (name: string) => Promise<void> | void;
+  onRegenerateInvite: () => Promise<string | null>;
+  onRemoveMember: (userId: string) => Promise<void> | void;
+  onLeaveVault: () => Promise<void> | void;
   onSave: (key: "pricecharting_enabled" | "pricecharting_token", value: boolean | string) => void;
   onSavePreferences: (preferences: Profile["preferences"]) => void;
   onClose: () => void;
@@ -1384,18 +1393,187 @@ function SettingsModal({ preferences, priceEnabled, priceTokenSet, onSave, onSav
   // Write-only token field: we never receive the saved token, only whether one
   // exists, so the input starts empty and "paste to replace" rather than showing it.
   const [tokenDraft, setTokenDraft] = useState("");
+  // Your Vault local state.
+  const isOwner = role === "owner";
+  const [code, setCode] = useState(household.invite_code);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(household.name);
+  const [copied, setCopied] = useState(false);
+  const [vaultBusy, setVaultBusy] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  // Settings is a menu: null shows the three section buttons; a value drills into
+  // that pane (with a back arrow in the header).
+  const [pane, setPane] = useState<"vault" | "dashboard" | "api" | null>(null);
+  // Leaving as the sole member deletes the vault (and all its games) — warn for that.
+  const soleMember = members.length <= 1;
+  const inviteLink = typeof window !== "undefined" ? `${window.location.origin}/join/${code}` : `/join/${code}`;
+
+  const copyInvite = async () => {
+    try { await navigator.clipboard.writeText(inviteLink); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch { /* clipboard blocked */ }
+  };
+  const regenerate = async () => {
+    if (vaultBusy) return; setVaultBusy(true);
+    try { const next = await onRegenerateInvite(); if (next) setCode(next); } catch { /* surfaced by reload */ } finally { setVaultBusy(false); }
+  };
+  const saveName = async () => {
+    const n = nameDraft.trim();
+    if (!n || n === household.name) { setEditingName(false); setNameDraft(household.name); return; }
+    setVaultBusy(true);
+    try { await onRenameVault(n); setEditingName(false); } finally { setVaultBusy(false); }
+  };
+  const leave = async () => {
+    if (vaultBusy) return; setVaultBusy(true);
+    try { await onLeaveVault(); window.location.assign("/"); } catch { setVaultBusy(false); }
+  };
   const lbl: React.CSSProperties = { fontSize: 10, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, marginBottom: 8, display: "block" };
   const inp: React.CSSProperties = { flex: 1, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", color: "var(--ink)", padding: "10px 12px", fontSize: 14, fontFamily: "var(--body)", outline: "none", boxSizing: "border-box" };
+
+  const menu: { key: "vault" | "dashboard" | "api"; icon: typeof Home; title: string; desc: string }[] = [
+    { key: "vault", icon: Home, title: "Your Vault", desc: isOwner ? "Name, invite link & members" : "Members & leaving the vault" },
+    { key: "dashboard", icon: LayoutGrid, title: "Dashboard Customization", desc: "Choose which overview blocks show" },
+    { key: "api", icon: Tag, title: "External API's", desc: "PriceCharting pricing & token" },
+  ];
+  const paneTitle = pane === "vault" ? "YOUR VAULT" : pane === "dashboard" ? "DASHBOARD" : pane === "api" ? "EXTERNAL API'S" : "SETTINGS";
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} className="fade">
       <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "calc(94vh - env(safe-area-inset-top))", overflowY: "auto", overflowX: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: "20px 20px calc(20px + env(safe-area-inset-bottom))" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-          <div style={{ fontFamily: "var(--display)", fontSize: 16, color: "var(--accent)" }}>SETTINGS</div>
-          <button onClick={onClose} style={{ display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><X size={16} /></button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            {pane && (
+              <button onClick={() => setPane(null)} aria-label="Back"
+                style={{ display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><ChevronLeft size={16} /></button>
+            )}
+            <div style={{ fontFamily: "var(--display)", fontSize: 16, color: "var(--accent)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{paneTitle}</div>
+          </div>
+          <button onClick={onClose} style={{ flexShrink: 0, display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><X size={16} /></button>
         </div>
 
-        <div style={{ marginBottom: 22 }}>
+        {/* ---- MENU ---- */}
+        {pane === null && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {menu.map(({ key, icon: Icon, title, desc }) => (
+              <button key={key} onClick={() => setPane(key)}
+                style={{ display: "flex", alignItems: "center", gap: 14, padding: 16, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", cursor: "pointer", color: "var(--ink)", textAlign: "left", width: "100%" }}>
+                <div style={{ flexShrink: 0, display: "grid", placeItems: "center", width: 40, height: 40, borderRadius: 12, background: "var(--panel-alt)", color: "var(--accent)" }}><Icon size={18} /></div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14.5, fontWeight: 700 }}>{title}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-dim)", marginTop: 2 }}>{desc}</div>
+                </div>
+                <ChevronRight size={18} color="var(--ink-dim)" style={{ flexShrink: 0 }} />
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* ---- YOUR VAULT ---- */}
+        {pane === "vault" && (
+        <div>
+          <div style={{ fontSize: 11.5, color: "var(--ink-dim)", lineHeight: 1.5, marginBottom: 12 }}>
+            {isOwner ? "You own this vault. Share the invite link to bring household members in." : "You're a member of this vault."}
+          </div>
+
+          {/* Vault name */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", marginBottom: 10 }}>
+            {editingName ? (
+              <>
+                <input autoFocus style={inp} value={nameDraft} onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") { setEditingName(false); setNameDraft(household.name); } }} />
+                <button onClick={saveName} disabled={vaultBusy} aria-label="Save name"
+                  style={{ flexShrink: 0, display: "grid", placeItems: "center", width: 36, height: 36, border: "none", borderRadius: "var(--radius)", cursor: "pointer", background: "var(--accent2)", color: "var(--bg)" }}><Check size={16} strokeWidth={3} /></button>
+                <button onClick={() => { setEditingName(false); setNameDraft(household.name); }} aria-label="Cancel"
+                  style={{ flexShrink: 0, display: "grid", placeItems: "center", width: 36, height: 36, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", cursor: "pointer", color: "var(--ink-dim)" }}><X size={16} /></button>
+              </>
+            ) : (
+              <>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>VAULT NAME</div>
+                  <div style={{ fontSize: 14.5, fontWeight: 700, marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{household.name}</div>
+                </div>
+                {isOwner && (
+                  <button onClick={() => { setNameDraft(household.name); setEditingName(true); }} aria-label="Rename vault"
+                    style={{ flexShrink: 0, display: "grid", placeItems: "center", width: 34, height: 34, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink-dim)" }}><Pencil size={14} /></button>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Invite code + link */}
+          <div style={{ padding: "12px 14px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", marginBottom: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>INVITE CODE</div>
+                <div style={{ fontFamily: "var(--display)", fontSize: 19, fontWeight: 700, letterSpacing: 3, marginTop: 3 }}>{code}</div>
+              </div>
+              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+                <button onClick={copyInvite}
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", border: "none", borderRadius: "var(--radius)", cursor: "pointer", background: copied ? "var(--good)" : "var(--accent2)", color: "var(--bg)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 11 }}>
+                  {copied ? <><Check size={13} strokeWidth={3} /> COPIED</> : <><Copy size={13} /> COPY LINK</>}
+                </button>
+                {isOwner && (
+                  <button onClick={regenerate} disabled={vaultBusy} title="Regenerate code (invalidates the old link)" aria-label="Regenerate invite code"
+                    style={{ flexShrink: 0, display: "grid", placeItems: "center", width: 34, height: 34, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 99, cursor: vaultBusy ? "wait" : "pointer", color: "var(--ink-dim)" }}>
+                    {vaultBusy ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
+                  </button>
+                )}
+              </div>
+            </div>
+            <div style={{ fontSize: 10.5, color: "var(--ink-dim)", fontFamily: "var(--display)", marginTop: 8, wordBreak: "break-all" }}>{inviteLink}</div>
+          </div>
+
+          {/* Members */}
+          <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}><Users size={12} />Members ({members.length})</label>
+          <div style={{ display: "flex", flexDirection: "column", border: "1px solid var(--line)", borderRadius: "var(--radius)", overflow: "hidden" }}>
+            {members.map((m, i) => {
+              const p = m.profile;
+              const isSelf = m.user_id === currentUserId;
+              return (
+                <div key={m.user_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: "var(--bg)", borderTop: i ? "1px solid var(--line)" : "none" }}>
+                  {p ? <Avatar user={p} size={30} /> : <div style={{ width: 30, height: 30, borderRadius: 99, background: "var(--panel-alt)" }} />}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {p?.name ?? "Member"}{isSelf && <span style={{ color: "var(--ink-dim)", fontWeight: 400 }}> · you</span>}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: m.role === "owner" ? "var(--accent3)" : "var(--ink-dim)", fontFamily: "var(--display)", letterSpacing: 1, marginTop: 2 }}>
+                      {m.role === "owner" ? <><Crown size={11} /> OWNER</> : "MEMBER"}
+                    </div>
+                  </div>
+                  {isOwner && !isSelf && (
+                    <button onClick={() => onRemoveMember(m.user_id)} aria-label={`Remove ${p?.name ?? "member"}`}
+                      style={{ flexShrink: 0, display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--bad)" }}><UserMinus size={14} /></button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Leave / delete */}
+          <div style={{ marginTop: 12 }}>
+            {confirmLeave ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: "var(--bg)", border: "1px solid var(--bad)", borderRadius: "var(--radius)" }}>
+                <span style={{ flex: 1, fontSize: 12, color: "var(--ink)", lineHeight: 1.4 }}>
+                  {soleMember ? "Delete this vault and everything in it? This can't be undone." : isOwner ? "Leave? Ownership passes to another member." : "Leave this vault?"}
+                </span>
+                <button onClick={leave} disabled={vaultBusy}
+                  style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", border: "none", borderRadius: "var(--radius)", cursor: vaultBusy ? "wait" : "pointer", background: "var(--bad)", color: "#fff", fontFamily: "var(--display)", fontWeight: 700, fontSize: 11 }}>
+                  {vaultBusy ? <Loader2 size={13} className="spin" /> : <Check size={13} strokeWidth={3} />} {soleMember ? "DELETE" : "LEAVE"}
+                </button>
+                <button onClick={() => setConfirmLeave(false)} disabled={vaultBusy}
+                  style={{ flexShrink: 0, padding: "8px 12px", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", cursor: "pointer", color: "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 11 }}>CANCEL</button>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmLeave(true)}
+                style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--bad)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 12 }}>
+                {soleMember ? <><Trash2 size={14} /> Delete vault</> : <><LogOut size={14} /> Leave vault</>}
+              </button>
+            )}
+          </div>
+        </div>
+        )}
+
+        {/* ---- EXTERNAL API'S ---- */}
+        {pane === "api" && (
+        <div>
           <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}><Tag size={12} />Pricing</label>
           <div style={{ fontSize: 11.5, color: "var(--ink-dim)", lineHeight: 1.5, marginBottom: 12 }}>
             Shared with your household. When on, auto-filling a game also fetches a market value from the paid PriceCharting API (converted to € at the live rate) and picks the price matching its condition. Turn it off when you&apos;re not subscribed — values then stay manual.
@@ -1431,8 +1609,11 @@ function SettingsModal({ preferences, priceEnabled, priceTokenSet, onSave, onSav
           </div>
           )}
         </div>
+        )}
 
-        <div style={{ borderTop: "1px solid var(--line)", paddingTop: 18 }}>
+        {/* ---- DASHBOARD CUSTOMIZATION ---- */}
+        {pane === "dashboard" && (
+        <div>
           <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}><LayoutGrid size={12} />Overview sections</label>
           <div style={{ fontSize: 11.5, color: "var(--ink-dim)", lineHeight: 1.5, marginBottom: 12 }}>
             Just for you — pick which blocks show on your overview. The hero and your collection stats always stay.
@@ -1453,6 +1634,7 @@ function SettingsModal({ preferences, priceEnabled, priceTokenSet, onSave, onSav
             })}
           </div>
         </div>
+        )}
       </div>
     </div>
   );
