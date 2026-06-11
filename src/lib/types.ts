@@ -118,6 +118,9 @@ export interface Game {
   cover?: string | null;
   description?: string | null;
   screenshots?: string[];
+  // IGDB's systems for this game, mapped to our PLATFORMS — cached so the edit
+  // form can narrow the platform dropdown without re-calling IGDB. Empty = unknown.
+  platforms?: string[];
   hltb?: { main: number | null; extra: number | null; complete: number | null } | null;
   igdb_id?: number | null;
   pricecharting_id?: string | null;
@@ -152,6 +155,59 @@ export const PLATFORMS = [
   // Other
   "PC", "Atari 2600", "Neo Geo", "TurboGrafx-16",
 ];
+
+// IGDB platform abbreviations/names → our curated PLATFORMS values. The lookup
+// normalises both sides (lowercased, non-alphanumerics stripped) so "PS Vita"/
+// "Vita", "Xbox Series X|S"/"XSX", "Sega Mega Drive/Genesis"/"Genesis" all resolve.
+// Anything unmapped is simply dropped — callers then fall back to the full list
+// rather than showing an empty dropdown, so a missing entry never blocks a save.
+const IGDB_PLATFORM_ALIASES: Record<string, string> = {
+  ps1: "PS1", playstation: "PS1",
+  ps2: "PS2", playstation2: "PS2",
+  ps3: "PS3", playstation3: "PS3",
+  ps4: "PS4", playstation4: "PS4",
+  ps5: "PS5", playstation5: "PS5",
+  psp: "PSP", playstationportable: "PSP",
+  vita: "PS Vita", psvita: "PS Vita", playstationvita: "PS Vita",
+  nes: "NES", famicom: "NES", familycomputer: "NES", nintendoentertainmentsystem: "NES",
+  snes: "SNES", sfam: "SNES", superfamicom: "SNES", supernintendoentertainmentsystem: "SNES",
+  n64: "N64", nintendo64: "N64",
+  ngc: "GameCube", gc: "GameCube", gamecube: "GameCube", nintendogamecube: "GameCube",
+  wii: "Wii",
+  wiiu: "Wii U",
+  switch: "Switch", nintendoswitch: "Switch",
+  switch2: "Switch 2", nintendoswitch2: "Switch 2",
+  gb: "Game Boy", gameboy: "Game Boy",
+  gbc: "Game Boy Color", gameboycolor: "Game Boy Color",
+  gba: "Game Boy Advance", gameboyadvance: "Game Boy Advance",
+  nds: "DS", ds: "DS", nintendods: "DS",
+  "3ds": "3DS", nintendo3ds: "3DS", new3ds: "3DS",
+  xbox: "Xbox",
+  x360: "Xbox 360", xbox360: "Xbox 360",
+  xone: "Xbox One", xboxone: "Xbox One",
+  seriesx: "Xbox Series", xsx: "Xbox Series", seriesxs: "Xbox Series", xboxseries: "Xbox Series", xboxseriesxs: "Xbox Series", xboxseriesx: "Xbox Series", xboxseriess: "Xbox Series",
+  sms: "Master System", mastersystem: "Master System", segamastersystem: "Master System",
+  genesis: "Mega Drive", megadrive: "Mega Drive", segamegadrive: "Mega Drive", segagenesis: "Mega Drive", segamegadrivegenesis: "Mega Drive",
+  saturn: "Saturn", segasaturn: "Saturn",
+  dc: "Dreamcast", dreamcast: "Dreamcast", segadreamcast: "Dreamcast",
+  gg: "Game Gear", gamegear: "Game Gear", segagamegear: "Game Gear",
+  pc: "PC", win: "PC", windows: "PC", microsoftwindows: "PC", pcmicrosoftwindows: "PC", dos: "PC",
+  atari2600: "Atari 2600", "2600": "Atari 2600",
+  neogeo: "Neo Geo", neogeoaes: "Neo Geo", neogeomvs: "Neo Geo", neogeocd: "Neo Geo",
+  tg16: "TurboGrafx-16", turbografx16: "TurboGrafx-16", pcengine: "TurboGrafx-16", turbografx16pcengine: "TurboGrafx-16",
+};
+
+// Map a list of IGDB platform strings to our PLATFORMS values, de-duped and in
+// order. Unrecognised platforms are dropped (see IGDB_PLATFORM_ALIASES).
+export function igdbPlatformsToApp(list: readonly string[] | null | undefined): string[] {
+  const out: string[] = [];
+  for (const raw of list ?? []) {
+    const mapped = IGDB_PLATFORM_ALIASES[String(raw).toLowerCase().replace(/[^a-z0-9]/g, "")];
+    if (mapped && !out.includes(mapped)) out.push(mapped);
+  }
+  return out;
+}
+
 export const CONDITIONS = ["Sealed", "CIB", "Loose"];
 export const REGIONS = ["PAL", "NTSC-U", "NTSC-J"];
 export const DEFAULT_GENRES = ["RPG", "Action", "Platformer", "Horror", "Strategy", "Adventure"];

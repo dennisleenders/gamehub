@@ -20,7 +20,7 @@ import { avatarSrc } from "@/lib/avatars";
 import {
   type Game, type Profile, type PlayStatus, type UpcomingGame, type Household, type HouseholdRole,
   type MemberWithProfile, PLAY_STATUS, PLATFORM_TINT,
-  CONDITIONS, PLATFORMS, OVERVIEW_SECTIONS, money, fmtDate,
+  CONDITIONS, PLATFORMS, OVERVIEW_SECTIONS, money, fmtDate, igdbPlatformsToApp,
 } from "@/lib/types";
 
 const FALLBACK_TINTS = ["#9b8cff", "#6fc7b3", "#e6b667", "#e0738a", "#7fb2ff", "#c98cff"];
@@ -110,6 +110,31 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
     () => new Set(games.filter((g) => g.status === "wishlist" && g.igdb_id != null).map((g) => g.igdb_id as number)),
     [games],
   );
+  // IGDB ids already in the collection as owned — so the Upcoming view hides the
+  // quick-wishlist heart on them (can't wishlist something you already own).
+  const ownedIgdbIds = useMemo(
+    () => new Set(games.filter((g) => g.status === "owned" && g.igdb_id != null).map((g) => g.igdb_id as number)),
+    [games],
+  );
+
+  // One-tap wishlist straight from an Upcoming card — no detail modal. Enriches
+  // with the same best-effort IGDB metadata the modal's add does, assigns the
+  // first listed platform, then writes through saveGame.
+  const wishlistUpcoming = async (g: UpcomingGame) => {
+    let meta: UpcomingMeta = null;
+    try {
+      const r = await fetch("/api/metadata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: g.title }) });
+      if (r.ok) meta = await r.json();
+    } catch { /* metadata is best-effort; add with the core fields regardless */ }
+    await saveGame(upcomingWishlistPayload(g, meta));
+  };
+
+  // Tapping a filled heart removes the matching wishlist entry (deletes the row —
+  // a wishlist game is just a games row with status "wishlist").
+  const unwishlistUpcoming = async (g: UpcomingGame) => {
+    const existing = games.find((x) => x.igdb_id === g.igdbId && x.status === "wishlist");
+    if (existing) await deleteGame(existing.id);
+  };
 
   // The collection game (if any) that matches the open upcoming release, so its
   // modal can show "already added" instead of an add button.
@@ -360,7 +385,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
       {view === "upcoming" && (
         <div style={{ position: "relative", maxWidth: 940, margin: "0 auto", padding: "0 16px 110px" }}>
           {topbar(false)}
-          <UpcomingView games={upcoming} loading={upcomingLoading} error={upcomingError} wishlistIds={wishlistIgdbIds} onOpen={setUpcomingDetail} />
+          <UpcomingView games={upcoming} loading={upcomingLoading} error={upcomingError} wishlistIds={wishlistIgdbIds} ownedIds={ownedIgdbIds} onWishlist={wishlistUpcoming} onUnwishlist={unwishlistUpcoming} onOpen={setUpcomingDetail} />
         </div>
       )}
 
@@ -896,6 +921,29 @@ function DetailView({ game, userById, currentUser, onProgress, onClose, onEdit }
 }
 
 // Detail modal for an unreleased IGDB game from the Upcoming view. A trimmed
+// Shared shape for the best-effort IGDB enrichment, and the wishlist-add payload
+// builder — used by both the detail modal and the Upcoming card's quick-add so
+// the two stay identical (first listed platform, status wishlist, same fields).
+type UpcomingMeta = { developer?: string; publisher?: string; description?: string; screenshots?: string[]; rating?: number | null } | null;
+function upcomingWishlistPayload(g: UpcomingGame, meta: UpcomingMeta): Partial<Game> {
+  const platforms = igdbPlatformsToApp(g.platforms);
+  return {
+    title: g.title,
+    platform: platforms[0] ?? g.platforms[0] ?? "—",
+    platforms,
+    status: "wishlist",
+    cover: g.cover || null,
+    genre: g.genre || null,
+    year: new Date(g.releaseDate * 1000).getFullYear(),
+    igdb_id: g.igdbId,
+    developer: meta?.developer || null,
+    publisher: meta?.publisher || null,
+    description: meta?.description || null,
+    screenshots: meta?.screenshots?.length ? meta.screenshots : undefined,
+    rating: meta?.rating ?? null,
+  };
+}
+
 // DetailView: no players/HLTB/value/condition — just developer, publisher, genre,
 // the release date, and a one-tap "add to wishlist". Developer/publisher (plus a
 // blurb + screenshots) aren't in the upcoming feed, so they're enriched on open
@@ -934,20 +982,7 @@ function UpcomingDetail({ g, existingStatus, onClose, onAdd }: {
 
   const handleAdd = async () => {
     setAdding(true);
-    await onAdd({
-      title: g.title,
-      platform: g.platforms[0] ?? "—",
-      status: "wishlist",
-      cover: g.cover || null,
-      genre: g.genre || null,
-      year: new Date(g.releaseDate * 1000).getFullYear(),
-      igdb_id: g.igdbId,
-      developer: meta?.developer || null,
-      publisher: meta?.publisher || null,
-      description: meta?.description || null,
-      screenshots: meta?.screenshots?.length ? meta.screenshots : undefined,
-      rating: meta?.rating ?? null,
-    });
+    await onAdd(upcomingWishlistPayload(g, meta));
     setAdding(false);
   };
 
@@ -1070,6 +1105,20 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
   const [pricedName, setPricedName] = useState<string>(game.priceTiers ? (game.title || "") : "");
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
 
+  // Systems IGDB lists for this game (mapped to our PLATFORMS), so the PLATFORM
+  // dropdown can be narrowed to just what the game actually released on. Empty
+  // until we learn them (suggestion pick / FILL / edit-open lookup), and the
+  // Select falls back to the full list while empty. Learned platforms replace it;
+  // for a new entry we also snap the selection to the first supported system when
+  // the current pick isn't one of them (an existing game keeps its saved system).
+  const [availablePlatforms, setAvailablePlatforms] = useState<string[]>(game.platforms ?? []);
+  const applyPlatforms = (igdbList: string[] | undefined) => {
+    const mapped = igdbPlatformsToApp(igdbList);
+    if (!mapped.length) return; // unmapped/none → keep the full-list fallback
+    setAvailablePlatforms(mapped);
+    if (isNew) setF((p: any) => (mapped.includes(p.platform) ? p : { ...p, platform: mapped[0] }));
+  };
+
   // --- Title typeahead (combobox) ---
   type Suggestion = { igdbId: number; title: string; platforms: string[] };
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -1129,6 +1178,7 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
         }
         return next;
       });
+      applyPlatforms(m.platforms);
       setFetchState("done");
     } catch { setFetchState("empty"); }
   };
@@ -1145,6 +1195,21 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
       scanFilledRef.current = true;
       void autoFill();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Lazy backfill: a known game that predates the cached `platforms` column has
+  // its systems looked up once on open (and persisted on the next save). Games
+  // that already carry platforms — or have no igdb_id — skip the call entirely,
+  // which is the whole point: after one save we never hit IGDB on edit again.
+  useEffect(() => {
+    if (isNew || !game.igdb_id || (game.platforms?.length ?? 0) > 0) return;
+    let active = true;
+    fetch("/api/metadata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: game.title || "", igdbId: game.igdb_id }) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((m) => { if (active && m) applyPlatforms(m.platforms); })
+      .catch(() => {});
+    return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1201,6 +1266,7 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
     setFetchState("idle");
     set("title", s.title);
     set("igdb_id", s.igdbId);
+    applyPlatforms(s.platforms); // the suggestion already carries the game's systems
     void autoFill(s.igdbId);
   };
 
@@ -1220,10 +1286,17 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
       region: f.region, genre: f.genre, year: Number(f.year) || null, developer: f.developer,
       publisher: f.publisher, rating: f.rating == null ? null : Number(f.rating),
       value_cents: (Number(f.value_eur) || 0) * 100, cover: f.cover, description: f.description,
-      screenshots: f.screenshots, hltb: f.hltb, igdb_id: f.igdb_id, pricecharting_id: f.pricecharting_id ?? null,
+      screenshots: f.screenshots, platforms: availablePlatforms, hltb: f.hltb, igdb_id: f.igdb_id, pricecharting_id: f.pricecharting_id ?? null,
       myStatus: f.status === "owned" ? f.myStatus : undefined, myHours: Number(f.myHours) || 0,
     });
   };
+
+  // Narrow the PLATFORM dropdown to the game's systems when we know them; fall back
+  // to the full list otherwise. The current selection is always kept selectable so
+  // a saved system (or one IGDB doesn't list) is never dropped from the options.
+  const platformOpts = availablePlatforms.length
+    ? (availablePlatforms.includes(f.platform) ? availablePlatforms : [f.platform, ...availablePlatforms])
+    : PLATFORMS;
 
   const inp: React.CSSProperties = { width: "100%", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", color: "var(--ink)", padding: "10px 12px", fontSize: 14, fontFamily: "var(--body)", outline: "none", boxSizing: "border-box" };
   const lbl: React.CSSProperties = { fontSize: 10, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, marginBottom: 6, display: "block" };
@@ -1353,7 +1426,7 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
         )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
-          <Field label="PLATFORM"><Select value={f.platform} opts={PLATFORMS} onChange={(v: string) => set("platform", v)} /></Field>
+          <Field label="PLATFORM"><Select value={f.platform} opts={platformOpts} onChange={(v: string) => set("platform", v)} /></Field>
           <Field label="CONDITION"><Select value={f.condition} opts={CONDITIONS} labelFor={conditionLabel} onChange={(v: string) => {
             set("condition", v);
             // If FILL fetched prices, re-derive the value for the new condition.

@@ -46,7 +46,7 @@ async function search(headers: Record<string, string>, title: string, igdbId?: n
   const fields = `
     fields name, summary, first_release_date, rating,
            cover.image_id, screenshots.image_id,
-           genres.name,
+           genres.name, platforms.abbreviation, platforms.name,
            involved_companies.company.name,
            involved_companies.developer, involved_companies.publisher;
     limit 1;
@@ -75,6 +75,9 @@ async function search(headers: Record<string, string>, title: string, igdbId?: n
       developer,
       publisher,
       screenshots: (g.screenshots ?? []).slice(0, 4).map((s: any) => imgUrl(s.image_id, "t_screenshot_big")),
+      platforms: (g.platforms ?? [])
+        .map((p: any) => p.abbreviation || p.name)
+        .filter((x: unknown): x is string => typeof x === "string" && x.length > 0),
     },
   });
 }

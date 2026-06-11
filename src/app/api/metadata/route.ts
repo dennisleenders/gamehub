@@ -66,6 +66,7 @@ export async function POST(req: Request) {
     genre: m.genre ?? "",
     rating: m.rating ?? null,
     screenshots: m.screenshots ?? [],
+    platforms: Array.isArray(m.platforms) ? m.platforms : [],
     igdb_id: m.igdbId ?? null,
     hltb: hltb?.match?.hltb ?? null,
     price: priceOut,

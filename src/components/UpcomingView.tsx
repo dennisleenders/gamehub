@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { CalendarClock, Loader2, Heart, ChevronDown, Grid2x2, LayoutGrid, List, X } from "lucide-react";
 import type { UpcomingGame } from "@/lib/types";
 
@@ -83,48 +83,83 @@ export function UpcomingRail({ games, loading, error, count = 10, wishlistIds, o
   );
 }
 
-function UpcomingCard({ g, wishlisted, onClick }: { g: UpcomingGame; wishlisted?: boolean; onClick?: () => void }) {
+// Builds the heart's toggle: add when off, remove when on. Undefined for owned
+// games (can't wishlist something already in the collection) so the heart hides.
+function wishlistToggle(g: UpcomingGame, owned?: boolean, onWishlist?: (g: UpcomingGame) => Promise<void> | void, onUnwishlist?: (g: UpcomingGame) => Promise<void> | void) {
+  if (owned) return undefined;
+  return (next: boolean) => (next ? onWishlist?.(g) : onUnwishlist?.(g));
+}
+
+function UpcomingCard({ g, wishlisted, owned, onWishlist, onUnwishlist, onClick }: { g: UpcomingGame; wishlisted?: boolean; owned?: boolean; onWishlist?: (g: UpcomingGame) => Promise<void> | void; onUnwishlist?: (g: UpcomingGame) => Promise<void> | void; onClick?: () => void }) {
   return (
-    <button onClick={onClick} className="upcoming-card game-card" style={{ display: "flex", flexDirection: "column", gap: 9, color: "var(--ink)", minWidth: 0, background: "none", border: "none", padding: 0, textAlign: "left", font: "inherit", cursor: onClick ? "pointer" : "default" }}>
-      <UpcomingCover g={g} ratio={1.32} wishlisted={wishlisted} />
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.2, height: "2.4em", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{g.title}</div>
-        <div style={{ fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--display)", marginTop: 5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.platforms.length ? platformLine(g.platforms) : (g.genre || "—")}</div>
-      </div>
+    <div style={{ position: "relative", minWidth: 0 }}>
+      <button onClick={onClick} className="upcoming-card game-card" style={{ display: "flex", flexDirection: "column", gap: 9, color: "var(--ink)", minWidth: 0, width: "100%", background: "none", border: "none", padding: 0, textAlign: "left", font: "inherit", cursor: onClick ? "pointer" : "default" }}>
+        <UpcomingCover g={g} ratio={1.32} />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.2, height: "2.4em", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{g.title}</div>
+          <div style={{ fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--display)", marginTop: 5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.platforms.length ? platformLine(g.platforms) : (g.genre || "—")}</div>
+        </div>
+      </button>
+      <WishlistButton wishlisted={!!wishlisted} onToggle={wishlistToggle(g, owned, onWishlist, onUnwishlist)} />
+    </div>
+  );
+}
+
+// Rounded heart pinned to a card/row's top corner: tap to add to the wishlist,
+// tap again to remove. The fill flips instantly (optimistic — no spinner) and the
+// write happens in the background; the prop reconciles it once the reload lands,
+// and a failed write reverts the fill. Hidden entirely when there's no action
+// (e.g. the game is already owned) and it isn't wishlisted.
+function WishlistButton({ wishlisted, onToggle, style }: { wishlisted: boolean; onToggle?: (next: boolean) => Promise<void> | void; style?: CSSProperties }) {
+  // `optimistic` overrides the fill only while a write is in flight; clearing it
+  // afterward hands control back to the reloaded prop (and reverts on failure).
+  const [optimistic, setOptimistic] = useState<boolean | null>(null);
+  const on = optimistic ?? wishlisted;
+  if (!onToggle) return null; // no action available (e.g. already owned)
+  const base: CSSProperties = { position: "absolute", top: 7, right: 7, zIndex: 2, display: "grid", placeItems: "center", width: 28, height: 28, borderRadius: 99, background: "#13111ad0", backdropFilter: "blur(6px)", border: "none", padding: 0, cursor: "pointer", ...style };
+  const click = (e: MouseEvent) => {
+    e.stopPropagation();
+    const next = !on;
+    setOptimistic(next);
+    Promise.resolve(onToggle(next)).finally(() => setOptimistic(null));
+  };
+  return (
+    <button onClick={click} aria-label={on ? "Remove from wishlist" : "Add to wishlist"} aria-pressed={on} style={base}>
+      <Heart size={14} color={on ? "var(--accent)" : "#fff"} fill={on ? "var(--accent)" : "none"} />
     </button>
   );
 }
 
 // List-mode row: compact box-art thumbnail, then title + platforms, with the
 // release day trailing on the right. Mirrors the card's data, laid out wide.
-function UpcomingRow({ g, wishlisted, onClick }: { g: UpcomingGame; wishlisted?: boolean; onClick?: () => void }) {
+function UpcomingRow({ g, wishlisted, owned, onWishlist, onUnwishlist, onClick }: { g: UpcomingGame; wishlisted?: boolean; owned?: boolean; onWishlist?: (g: UpcomingGame) => Promise<void> | void; onUnwishlist?: (g: UpcomingGame) => Promise<void> | void; onClick?: () => void }) {
   const [err, setErr] = useState(false);
   const showArt = g.cover && !err;
   return (
-    <button onClick={onClick} className="upcoming-row game-card" style={{ display: "flex", alignItems: "center", gap: 13, padding: "9px 12px", borderRadius: "var(--radius)", background: "var(--panel)", border: "1px solid var(--line)", minWidth: 0, width: "100%", textAlign: "left", font: "inherit", color: "var(--ink)", cursor: onClick ? "pointer" : "default" }}>
-      <div style={{ flex: "0 0 auto", width: 46, aspectRatio: "1 / 1.32", borderRadius: 7, overflow: "hidden", position: "relative", border: "1px solid var(--line)", background: "linear-gradient(150deg, var(--accent)33, var(--panel-alt))" }}>
-        {showArt
-          ? <img src={g.cover} alt={g.title} loading="lazy" onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-          : <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}><span style={{ fontFamily: "var(--display)", fontSize: 18, color: "var(--accent)", opacity: .5 }}>{(g.title || "?")[0]}</span></div>}
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-          <span style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.25, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.title}</span>
-          {wishlisted && <Heart size={12} color="var(--accent)" fill="var(--accent)" style={{ flexShrink: 0 }} />}
+    <div style={{ position: "relative", width: "100%", minWidth: 0 }}>
+      <button onClick={onClick} className="upcoming-row game-card" style={{ display: "flex", alignItems: "center", gap: 13, padding: "9px 48px 9px 12px", borderRadius: "var(--radius)", background: "var(--panel)", border: "1px solid var(--line)", minWidth: 0, width: "100%", textAlign: "left", font: "inherit", color: "var(--ink)", cursor: onClick ? "pointer" : "default" }}>
+        <div style={{ flex: "0 0 auto", width: 46, aspectRatio: "1 / 1.32", borderRadius: 7, overflow: "hidden", position: "relative", border: "1px solid var(--line)", background: "linear-gradient(150deg, var(--accent)33, var(--panel-alt))" }}>
+          {showArt
+            ? <img src={g.cover} alt={g.title} loading="lazy" onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            : <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}><span style={{ fontFamily: "var(--display)", fontSize: 18, color: "var(--accent)", opacity: .5 }}>{(g.title || "?")[0]}</span></div>}
         </div>
-        <div style={{ fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--display)", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.platforms.length ? platformLine(g.platforms) : (g.genre || "—")}</div>
-      </div>
-      <div style={{ flex: "0 0 auto", display: "inline-flex", alignItems: "center", gap: 5 }}>
-        <CalendarClock size={12} color="var(--accent3)" />
-        <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "var(--display)" }}>{fmtDay(g.releaseDate)}</span>
-      </div>
-    </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.25, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.title}</div>
+          <div style={{ fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--display)", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.platforms.length ? platformLine(g.platforms) : (g.genre || "—")}</div>
+        </div>
+        <div style={{ flex: "0 0 auto", display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <CalendarClock size={12} color="var(--accent3)" />
+          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "var(--display)" }}>{fmtDay(g.releaseDate)}</span>
+        </div>
+      </button>
+      <WishlistButton wishlisted={!!wishlisted} onToggle={wishlistToggle(g, owned, onWishlist, onUnwishlist)} style={{ top: "50%", right: 10, transform: "translateY(-50%)" }} />
+    </div>
   );
 }
 
 // Full Upcoming view — the next 6 months of releases, grouped by month. Supports
 // filtering by system and wishlist status, plus two grid densities and a list view.
-export default function UpcomingView({ games, loading, error, wishlistIds, onOpen }: { games: UpcomingGame[] | null; loading: boolean; error: boolean; wishlistIds?: Set<number>; onOpen?: (g: UpcomingGame) => void }) {
+export default function UpcomingView({ games, loading, error, wishlistIds, ownedIds, onWishlist, onUnwishlist, onOpen }: { games: UpcomingGame[] | null; loading: boolean; error: boolean; wishlistIds?: Set<number>; ownedIds?: Set<number>; onWishlist?: (g: UpcomingGame) => Promise<void> | void; onUnwishlist?: (g: UpcomingGame) => Promise<void> | void; onOpen?: (g: UpcomingGame) => void }) {
   const [system, setSystem] = useState("all");
   const [wish, setWish] = useState("all");
   const [players, setPlayers] = useState("all");
@@ -136,6 +171,7 @@ export default function UpcomingView({ games, loading, error, wishlistIds, onOpe
   const onPlayers = (v: string) => { setPlayers(v); if (v === "all") setMpType("all"); };
 
   const isWished = (g: UpcomingGame) => !!wishlistIds?.has(g.igdbId);
+  const isOwned = (g: UpcomingGame) => !!ownedIds?.has(g.igdbId);
 
   // Distinct systems across every release, for the dropdown. Built from the full
   // list (not the filtered one) so the option set doesn't shrink as you filter.
@@ -243,18 +279,18 @@ export default function UpcomingView({ games, loading, error, wishlistIds, onOpe
       ) : (
         groups.map((m) => (
           <section key={m.label}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-              <span style={{ fontFamily: "var(--display)", fontSize: 14, fontWeight: 700, letterSpacing: 1 }}>{m.label}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 13, marginBottom: 18, paddingTop: 4 }}>
+              <span style={{ fontFamily: "var(--display)", fontSize: 18, fontWeight: 700, letterSpacing: 1 }}>{m.label}</span>
               <span style={{ fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>{m.games.length} {m.games.length === 1 ? "game" : "games"}</span>
               <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
             </div>
             {isList ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {m.games.map((g) => <UpcomingRow key={g.igdbId} g={g} wishlisted={isWished(g)} onClick={() => onOpen?.(g)} />)}
+                {m.games.map((g) => <UpcomingRow key={g.igdbId} g={g} wishlisted={isWished(g)} owned={isOwned(g)} onWishlist={onWishlist} onUnwishlist={onUnwishlist} onClick={() => onOpen?.(g)} />)}
               </div>
             ) : (
               <div className="card-grid" style={{ gridTemplateColumns: `repeat(auto-fill, ${cfg.col})`, gap: cfg.gap }}>
-                {m.games.map((g) => <UpcomingCard key={g.igdbId} g={g} wishlisted={isWished(g)} onClick={() => onOpen?.(g)} />)}
+                {m.games.map((g) => <UpcomingCard key={g.igdbId} g={g} wishlisted={isWished(g)} owned={isOwned(g)} onWishlist={onWishlist} onUnwishlist={onUnwishlist} onClick={() => onOpen?.(g)} />)}
               </div>
             )}
           </section>
