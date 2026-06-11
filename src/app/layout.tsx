@@ -3,6 +3,7 @@ import "./globals.css";
 import { ToastProvider } from "@/components/Toast";
 import RegisterSW from "@/components/RegisterSW";
 import IosInstallHint from "@/components/IosInstallHint";
+import NoZoom from "@/components/NoZoom";
 import { SPLASH_SCREENS } from "@/lib/splash";
 
 export const metadata: Metadata = {
@@ -30,8 +31,12 @@ export const viewport: Viewport = {
   themeColor: "#13111a",
   width: "device-width",
   initialScale: 1,
+  // Hard-disable zoom. These flags cover Android + the installed PWA; iOS Safari
+  // ignores them for pinch (handled in <NoZoom/>) but they still suppress the
+  // auto-zoom on input focus alongside the 16px form-control rule in globals.css.
+  maximumScale: 1,
+  userScalable: false,
   viewportFit: "cover", // required so env(safe-area-inset-*) report real insets
-  // Intentionally NOT disabling zoom — iOS ignores it and it harms accessibility.
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -48,6 +53,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ToastProvider>{children}</ToastProvider>
         <RegisterSW />
         <IosInstallHint />
+        <NoZoom />
       </body>
     </html>
   );

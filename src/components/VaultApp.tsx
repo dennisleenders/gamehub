@@ -566,7 +566,7 @@ function ImmersiveHero({ slides, userById, currentUser, onOpen }: { slides: { g:
     return (
       <div style={{ height: "62vh", minHeight: 440, display: "grid", placeItems: "center", background: "radial-gradient(120% 90% at 50% 0%, #e0738a1c, var(--bg))", borderBottom: "1px solid var(--line)" }}>
         <div style={{ textAlign: "center", padding: 24 }}>
-          <Gamepad2 size={34} color="var(--ink-dim)" style={{ opacity: .6 }} />
+          <Gamepad2 size={34} color="var(--ink-dim)" style={{ opacity: .6, margin: "0 auto" }} />
           <div style={{ fontFamily: "var(--display)", fontSize: 18, marginTop: 16 }}>Nothing in play</div>
           <div style={{ fontSize: 13, color: "var(--ink-dim)", marginTop: 8, maxWidth: 260, lineHeight: 1.5 }}>Set one of your games to <span style={{ color: "var(--accent2)" }}>Playing</span> and it&apos;ll headline here.</div>
         </div>

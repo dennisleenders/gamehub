@@ -60,7 +60,7 @@ export default function AchievementsView({
         </SectionHead>
         {challenges.length === 0 ? (
           <div style={{ textAlign: "center", padding: "44px 0", color: "var(--ink-dim)", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)" }}>
-            <Flag size={34} style={{ opacity: .5 }} />
+            <Flag size={34} style={{ opacity: .5, margin: "0 auto" }} />
             <div style={{ marginTop: 12, fontFamily: "var(--display)", fontSize: 13 }}>NO CHALLENGES YET</div>
             <div style={{ marginTop: 6, fontSize: 13 }}>Start one — everyone in the household races toward it.</div>
           </div>
