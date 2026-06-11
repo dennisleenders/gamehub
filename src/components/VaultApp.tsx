@@ -405,7 +405,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
           onSave={async (c) => { await saveChallenge(c); setCreatingChallenge(false); }} />
       )}
       {avatarOpen && (
-        <AvatarPickerModal currentUser={me} onClose={() => setAvatarOpen(false)} onSave={saveProfile} />
+        <AvatarPickerModal currentUser={me} others={profiles.filter((p) => p.id !== uid)} onClose={() => setAvatarOpen(false)} onSave={saveProfile} />
       )}
       {scanOpen && (
         <ScannerModal resolve={resolveUpc} onClose={() => setScanOpen(false)}
@@ -579,6 +579,12 @@ function ImmersiveHero({ slides, userById, currentUser, onOpen }: { slides: { g:
       <div ref={trackRef} onScroll={onScroll} className="hero-track" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} style={{ cursor: slides.length > 1 ? "grab" : "default" }}>
         {slides.map((s) => <HeroSlide key={s.g.id + ":" + s.pid} g={s.g} hours={s.hours} player={userById(s.pid)} currentUser={currentUser} onOpen={openGuarded} />)}
       </div>
+      {/* Single NOW PLAYING pill that sits over the slider — outside the scrolling
+          track so it stays put while slides move beneath it. */}
+      <div style={{ position: "absolute", top: "calc(74px + env(safe-area-inset-top))", left: 20, zIndex: 12, pointerEvents: "none", display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 12px 6px 9px", borderRadius: 99, background: "rgba(20,17,26,0.4)", backdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,0.14)" }}>
+        <span className="pulse" style={{ width: 7, height: 7, borderRadius: 99, background: "var(--accent2)" }} />
+        <span style={{ fontSize: 10.5, letterSpacing: 1.5, color: "#fff", fontFamily: "var(--display)", fontWeight: 700 }}>NOW PLAYING</span>
+      </div>
       {slides.length > 1 && (
         <div style={{ position: "absolute", left: 0, right: 0, bottom: 18, display: "flex", justifyContent: "center", gap: 9, zIndex: 12 }}>
           {slides.map((s, i) => { const c = userById(s.pid)?.color || "var(--accent2)"; const on = i === idx; return <button key={s.g.id + ":" + s.pid} onClick={() => goTo(i)} aria-label={`Slide ${i + 1}`} style={{ width: on ? 26 : 9, height: 9, borderRadius: 99, border: "none", cursor: "pointer", padding: 0, background: on ? c : "rgba(255,255,255,0.4)", transition: "all .3s" }} />; })}
@@ -604,10 +610,6 @@ function HeroSlide({ g, hours, player, currentUser, onOpen }: { g: Game; hours: 
         {showArt ? <img src={g.cover!} alt={g.title} onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontFamily: "var(--display)", fontSize: 96, color: tint, opacity: .5 }}>{(g.title || "?")[0]}</span>}
       </div>
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "linear-gradient(to top, #13111a 0%, rgba(19,17,26,0.82) 34%, rgba(19,17,26,0.12) 64%, rgba(19,17,26,0.28) 100%)" }} />
-      <div style={{ position: "absolute", top: "calc(74px + env(safe-area-inset-top))", left: 20, display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 12px 6px 9px", borderRadius: 99, background: "rgba(20,17,26,0.4)", backdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,0.14)" }}>
-        <span className="pulse" style={{ width: 7, height: 7, borderRadius: 99, background: "var(--accent2)" }} />
-        <span style={{ fontSize: 10.5, letterSpacing: 1.5, color: "#fff", fontFamily: "var(--display)", fontWeight: 700 }}>NOW PLAYING</span>
-      </div>
       <button onClick={() => onOpen(g)} style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "0 20px 54px", textAlign: "left", background: "none", border: "none", cursor: "pointer", color: "#fff", width: "100%" }}>
         {player && (
           <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 14, padding: "5px 13px 5px 5px", borderRadius: 99, background: player.color + "26", border: `1px solid ${player.color}` }}>
@@ -787,7 +789,7 @@ function DetailView({ game, userById, currentUser, onProgress, onClose, onEdit }
   const addedByUser = userById(g.added_by);
   const facts: [string, any][] = [["Developer", g.developer || "—"], ["Publisher", g.publisher || "—"], ["Released", g.year || "—"], ["Genre", g.genre || "—"], ["Condition", conditionLabel(g.condition) || "—"], ["Region", g.region || "—"]];
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", zIndex: 60, display: "flex", alignItems: "flex-end", justifyContent: "center" }} className="fade">
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", zIndex: 60, display: "flex", alignItems: "flex-end", justifyContent: "center" }} className="sheet-backdrop">
       <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "calc(94vh - env(safe-area-inset-top))", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
         <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", background: "var(--panel)", borderBottom: "1px solid var(--line)" }}>
           <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)", fontFamily: "var(--display)", fontSize: 12, fontWeight: 700 }}><ChevronLeft size={17} /> BACK</button>
@@ -956,7 +958,7 @@ function UpcomingDetail({ g, existingStatus, onClose, onAdd }: {
   };
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", zIndex: 60, display: "flex", alignItems: "flex-end", justifyContent: "center" }} className="fade">
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", zIndex: 60, display: "flex", alignItems: "flex-end", justifyContent: "center" }} className="sheet-backdrop">
       <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "calc(94vh - env(safe-area-inset-top))", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
         <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", background: "var(--panel)", borderBottom: "1px solid var(--line)" }}>
           <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)", fontFamily: "var(--display)", fontSize: 12, fontWeight: 700 }}><ChevronLeft size={17} /> BACK</button>
@@ -1244,7 +1246,7 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
   );
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} className="fade">
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} className="sheet-backdrop">
       <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "calc(94vh - env(safe-area-inset-top))", overflowY: "auto", overflowX: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: "20px 20px calc(20px + env(safe-area-inset-bottom))" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
           <div style={{ fontFamily: "var(--display)", fontSize: 16, color: "var(--accent)" }}>{isNew ? "NEW ENTRY" : "EDIT"}</div>
@@ -1436,7 +1438,7 @@ function SettingsModal({ preferences, priceEnabled, priceTokenSet, household, ro
   const paneTitle = pane === "vault" ? "YOUR VAULT" : pane === "dashboard" ? "DASHBOARD" : pane === "api" ? "EXTERNAL API'S" : "SETTINGS";
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} className="fade">
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} className="sheet-backdrop">
       <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "calc(94vh - env(safe-area-inset-top))", overflowY: "auto", overflowX: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: "20px 20px calc(20px + env(safe-area-inset-bottom))" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
@@ -1764,7 +1766,7 @@ function ScannerModal({ resolve, onResolved, onClose }: {
     "Point at the barcode on the box.";
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000d", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 80 }} className="fade">
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000d", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 80 }} className="sheet-backdrop">
       <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: "20px 20px calc(20px + env(safe-area-inset-bottom))" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ fontFamily: "var(--display)", fontSize: 16, color: "var(--accent)" }}>SCAN BARCODE</div>

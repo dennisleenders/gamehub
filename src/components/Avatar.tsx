@@ -29,20 +29,29 @@ export function Avatar({ user, size = 22 }: { user: AvatarUser; size?: number })
 }
 
 // A grid of selectable avatar images. `color` tints the selected ring + check.
-// Reused by registration and the logged-in picker.
-export function AvatarGrid({ value, color, onSelect }: { value?: string | null; color: string; onSelect: (id: string) => void }) {
+// Reused by registration and the logged-in picker. `disabledIds` are avatars
+// already claimed by other household members — shown dimmed and unselectable.
+export function AvatarGrid({ value, color, onSelect, disabledIds }: { value?: string | null; color: string; onSelect: (id: string) => void; disabledIds?: Set<string> }) {
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
       {AVATARS.map((a) => {
         const on = a.id === value;
+        // Never disable the user's own current pick, only ones others have taken.
+        const taken = !on && !!disabledIds?.has(a.id);
         return (
-          <button key={a.id} type="button" onClick={() => onSelect(a.id)} aria-label={`Avatar ${a.id}`}
-            style={{ position: "relative", width: 62, height: 62, padding: 0, borderRadius: 99, cursor: "pointer", border: "none", background: "none", lineHeight: 0 }}>
+          <button key={a.id} type="button" onClick={() => !taken && onSelect(a.id)} disabled={taken}
+            aria-label={taken ? `Avatar ${a.id} (taken)` : `Avatar ${a.id}`}
+            style={{ position: "relative", width: 62, height: 62, padding: 0, borderRadius: 99, cursor: taken ? "not-allowed" : "pointer", border: "none", background: "none", lineHeight: 0, opacity: taken ? 0.32 : 1 }}>
             {/* Border lives on the image (single element) so there's no seam ring. */}
             <img src={a.src} alt="" style={{ width: "100%", height: "100%", borderRadius: 99, objectFit: "cover", display: "block", border: `2px solid ${on ? color : "var(--line)"}` }} />
             {on && (
               <span style={{ position: "absolute", bottom: -3, right: -3, display: "grid", placeItems: "center", width: 22, height: 22, borderRadius: 99, background: color, border: "2px solid var(--panel)" }}>
                 <Check size={12} strokeWidth={3} color="var(--bg)" />
+              </span>
+            )}
+            {taken && (
+              <span style={{ position: "absolute", bottom: -3, right: -3, display: "grid", placeItems: "center", width: 22, height: 22, borderRadius: 99, background: "var(--line)", border: "2px solid var(--panel)" }}>
+                <X size={12} strokeWidth={3} color="var(--ink-dim)" />
               </span>
             )}
           </button>
@@ -53,15 +62,26 @@ export function AvatarGrid({ value, color, onSelect }: { value?: string | null; 
 }
 
 // Logged-in avatar chooser — a bottom sheet opened from the profile menu.
-export function AvatarPickerModal({ currentUser, onClose, onSave }: {
+// `others` are the rest of the household; their avatar/colour are off-limits so
+// no two members in a vault share the same pairing.
+export function AvatarPickerModal({ currentUser, others = [], onClose, onSave }: {
   currentUser: Profile;
+  others?: Pick<Profile, "avatar" | "color">[];
   onClose: () => void;
   onSave: (fields: { avatar: string; color: string }) => Promise<void> | void;
 }) {
   const [avatar, setAvatar] = useState<string | null>(currentUser.avatar ?? null);
   const [color, setColor] = useState<string>(currentUser.color);
   const [saving, setSaving] = useState(false);
-  const dirty = !!avatar && (avatar !== currentUser.avatar || color !== currentUser.color);
+  // Avatars/colours claimed by other members. The user's own current pick is
+  // never blocked, so a pre-existing clash can still be kept (or changed).
+  const takenAvatars = new Set(others.map((o) => o.avatar).filter(Boolean) as string[]);
+  const takenColors = new Set(others.map((o) => o.color));
+  // Safety net behind the disabled options: never persist a pairing that
+  // collides with another member's avatar or colour.
+  const clash = (!!avatar && avatar !== currentUser.avatar && takenAvatars.has(avatar))
+    || (color !== currentUser.color && takenColors.has(color));
+  const dirty = !!avatar && !clash && (avatar !== currentUser.avatar || color !== currentUser.color);
 
   const lbl: React.CSSProperties = { fontSize: 10, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, marginBottom: 10, display: "block" };
 
@@ -72,7 +92,7 @@ export function AvatarPickerModal({ currentUser, onClose, onSave }: {
   };
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} className="fade">
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} className="sheet-backdrop">
       <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "calc(94vh - env(safe-area-inset-top))", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: "20px 20px calc(20px + env(safe-area-inset-bottom))" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
           <div style={{ fontFamily: "var(--display)", fontSize: 16, color: "var(--accent)" }}>AVATAR &amp; COLOUR</div>
@@ -81,15 +101,23 @@ export function AvatarPickerModal({ currentUser, onClose, onSave }: {
 
         <label style={lbl}>AVATAR</label>
         {/* Selected ring uses the live colour choice so it previews the pairing. */}
-        <AvatarGrid value={avatar} color={color} onSelect={setAvatar} />
+        <AvatarGrid value={avatar} color={color} onSelect={setAvatar} disabledIds={takenAvatars} />
 
         <label style={{ ...lbl, marginTop: 20 }}>COLOUR</label>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {PROFILE_COLORS.map((c) => (
-            <button key={c} type="button" onClick={() => setColor(c)} aria-label="colour"
-              style={{ width: 32, height: 32, borderRadius: 99, background: c, cursor: "pointer",
-                border: color === c ? "3px solid var(--ink)" : "3px solid transparent" }} />
-          ))}
+          {PROFILE_COLORS.map((c) => {
+            const on = color === c;
+            // A colour another member uses is locked — but keep the user's own
+            // current colour selectable so they can leave it unchanged.
+            const taken = !on && c !== currentUser.color && takenColors.has(c);
+            return (
+              <button key={c} type="button" onClick={() => !taken && setColor(c)} disabled={taken} aria-label={taken ? "colour (taken)" : "colour"}
+                style={{ position: "relative", width: 32, height: 32, borderRadius: 99, background: c, cursor: taken ? "not-allowed" : "pointer",
+                  opacity: taken ? 0.32 : 1, border: on ? "3px solid var(--ink)" : "3px solid transparent" }}>
+                {taken && <X size={14} strokeWidth={3} color="var(--ink)" style={{ position: "absolute", inset: 0, margin: "auto" }} />}
+              </button>
+            );
+          })}
         </div>
 
         <button onClick={save} disabled={!dirty || saving}
