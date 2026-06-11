@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Joystick, Lock, UserPlus, AlertCircle, Loader2, MailCheck } from "lucide-react";
 import { AvatarGrid } from "@/components/Avatar";
-import { AVATARS } from "@/lib/avatars";
+import { AVATARS, randomLoreAvatar } from "@/lib/avatars";
 import { PROFILE_COLORS } from "@/lib/types";
 
 function LoginForm() {
@@ -118,7 +118,8 @@ function LoginForm() {
               </div>
               <label style={lbl}>PICK AN AVATAR</label>
               <div style={{ marginBottom: 16 }}>
-                <AvatarGrid value={avatar} color={color} onSelect={setAvatar} />
+                <AvatarGrid value={avatar} color={color} onSelect={setAvatar}
+                  onGenerate={() => setAvatar(randomLoreAvatar(avatar ? [avatar] : []))} />
               </div>
             </>
           )}

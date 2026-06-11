@@ -628,7 +628,7 @@ function HeroSlide({ g, hours, player, currentUser, onOpen }: { g: Game; hours: 
             <span style={{ fontFamily: "var(--display)", fontSize: 17, color: "#fff" }}>{hours}<span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>h played</span></span>
             {target && <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", fontFamily: "var(--display)" }}>{pct}% · ~{target}h to beat</span>}
           </div>
-          {target && <div style={{ height: 9, background: "rgba(255,255,255,0.18)", borderRadius: 99, overflow: "hidden" }}><div style={{ height: "100%", width: `${pct}%`, background: "var(--accent2)", borderRadius: 99 }} /></div>}
+          {target && <div style={{ height: 9, background: "rgba(255,255,255,0.18)", borderRadius: 99, overflow: "hidden" }}><div style={{ height: "100%", width: `${pct}%`, background: player?.color || "var(--accent2)", borderRadius: 99 }} /></div>}
         </div>
       </button>
     </div>
