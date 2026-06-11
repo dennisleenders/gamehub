@@ -579,12 +579,6 @@ function ImmersiveHero({ slides, userById, currentUser, onOpen }: { slides: { g:
       <div ref={trackRef} onScroll={onScroll} className="hero-track" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} style={{ cursor: slides.length > 1 ? "grab" : "default" }}>
         {slides.map((s) => <HeroSlide key={s.g.id + ":" + s.pid} g={s.g} hours={s.hours} player={userById(s.pid)} currentUser={currentUser} onOpen={openGuarded} />)}
       </div>
-      {/* Single NOW PLAYING pill that sits over the slider — outside the scrolling
-          track so it stays put while slides move beneath it. */}
-      <div style={{ position: "absolute", top: "calc(74px + env(safe-area-inset-top))", left: 20, zIndex: 12, pointerEvents: "none", display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 12px 6px 9px", borderRadius: 99, background: "rgba(20,17,26,0.4)", backdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,0.14)" }}>
-        <span className="pulse" style={{ width: 7, height: 7, borderRadius: 99, background: "var(--accent2)" }} />
-        <span style={{ fontSize: 10.5, letterSpacing: 1.5, color: "#fff", fontFamily: "var(--display)", fontWeight: 700 }}>NOW PLAYING</span>
-      </div>
       {slides.length > 1 && (
         <div style={{ position: "absolute", left: 0, right: 0, bottom: 18, display: "flex", justifyContent: "center", gap: 9, zIndex: 12 }}>
           {slides.map((s, i) => { const c = userById(s.pid)?.color || "var(--accent2)"; const on = i === idx; return <button key={s.g.id + ":" + s.pid} onClick={() => goTo(i)} aria-label={`Slide ${i + 1}`} style={{ width: on ? 26 : 9, height: 9, borderRadius: 99, border: "none", cursor: "pointer", padding: 0, background: on ? c : "rgba(255,255,255,0.4)", transition: "all .3s" }} />; })}
