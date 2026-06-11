@@ -1254,7 +1254,7 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
               onChange={(e) => { typingRef.current = true; set("title", e.target.value); setFetchState("idle"); }}
               onKeyDown={onTitleKeyDown}
               onFocus={() => { if (suggestions.length) setShowSuggest(true); }}
-              placeholder="Start typing a game title…" autoComplete="off" autoFocus
+              placeholder="Start typing a game title…" autoComplete="off"
               role="combobox" aria-expanded={showSuggest} aria-autocomplete="list" />
             {showSuggest && (
               <div role="listbox" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 80, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", boxShadow: "0 10px 30px #000a", overflow: "hidden", maxHeight: 320, overflowY: "auto" }}>
@@ -1473,7 +1473,7 @@ function SettingsModal({ preferences, priceEnabled, priceTokenSet, household, ro
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", marginBottom: 10 }}>
             {editingName ? (
               <>
-                <input autoFocus style={inp} value={nameDraft} onChange={(e) => setNameDraft(e.target.value)}
+                <input style={inp} value={nameDraft} onChange={(e) => setNameDraft(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") { setEditingName(false); setNameDraft(household.name); } }} />
                 <button onClick={saveName} disabled={vaultBusy} aria-label="Save name"
                   style={{ flexShrink: 0, display: "grid", placeItems: "center", width: 36, height: 36, border: "none", borderRadius: "var(--radius)", cursor: "pointer", background: "var(--accent2)", color: "var(--bg)" }}><Check size={16} strokeWidth={3} /></button>
@@ -1666,28 +1666,39 @@ function ScannerModal({ resolve, onResolved, onClose }: {
   const handledRef = useRef(false);
   const lastFailedRef = useRef("");
   const audioRef = useRef<AudioContext | null>(null);
+  const beepBufferRef = useRef<AudioBuffer | null>(null);
   const [phase, setPhase] = useState<"scanning" | "looking" | "notfound" | "error">("scanning");
   const [note, setNote] = useState("");
   const [manual, setManual] = useState("");
 
-  // Short confirmation beep (synthesised, no asset) + a haptic buzz on phones,
-  // fired the instant a barcode is decoded — the "got it" feedback.
+  // Confirmation sound (bleep.mp3) + a haptic buzz on phones, fired the instant a
+  // barcode is decoded — the "got it" feedback. The mp3 is decoded into the
+  // already-gesture-unlocked AudioContext so it plays on iOS without a fresh tap;
+  // a synth tone covers the brief window before the asset finishes loading.
   const beep = () => {
     const ctx = audioRef.current;
     if (ctx) {
       try {
         ctx.resume?.();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.value = 880;
-        gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.008);
-        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.2);
+        const buf = beepBufferRef.current;
+        if (buf) {
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.connect(ctx.destination);
+          src.start();
+        } else {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.value = 880;
+          gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.008);
+          gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.2);
+        }
       } catch { /* audio not available */ }
     }
     try { navigator.vibrate?.(60); } catch { /* no haptics */ }
@@ -1721,7 +1732,17 @@ function ScannerModal({ resolve, onResolved, onClose }: {
     // that opened the scanner — iOS only allows audio started from a gesture.
     try {
       const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (Ctx) { audioRef.current = new Ctx(); audioRef.current.resume?.(); }
+      if (Ctx) {
+        const ctx = new Ctx();
+        audioRef.current = ctx;
+        ctx.resume?.();
+        // Fetch + decode the scan sound up front so it's ready the moment a code
+        // is read. decodeAudioData's callback form keeps older Safari happy.
+        fetch("/sounds/bleep.mp3")
+          .then((r) => r.arrayBuffer())
+          .then((data) => ctx.decodeAudioData(data, (decoded) => { beepBufferRef.current = decoded; }, () => {}))
+          .catch(() => { /* fall back to the synth beep */ });
+      }
     } catch { /* audio not available */ }
 
     const reader = new BrowserMultiFormatReader(BARCODE_HINTS, SCAN_OPTIONS);

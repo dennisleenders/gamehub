@@ -306,7 +306,7 @@ export function CreateChallengeModal({ currentUser, onClose, onSave }: {
 
         <div style={{ marginBottom: 14 }}>
           <label style={lbl}>TITLE</label>
-          <input style={inp} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={`Finish 50 games in ${year}`} autoFocus />
+          <input style={inp} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={`Finish 50 games in ${year}`} />
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
