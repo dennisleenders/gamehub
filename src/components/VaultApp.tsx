@@ -16,6 +16,7 @@ import UpcomingView, { UpcomingRail, UpcomingCover } from "@/components/Upcoming
 import { useUpcoming } from "@/lib/useUpcoming";
 import { useAchievementToasts } from "@/components/useAchievementToasts";
 import { Avatar, AvatarPickerModal } from "@/components/Avatar";
+import Splash from "@/components/Splash";
 import { avatarSrc } from "@/lib/avatars";
 import {
   type Game, type Profile, type PlayStatus, type UpcomingGame, type Household, type HouseholdRole,
@@ -77,6 +78,22 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
   // Switching views (via the bottom nav or a dashboard shortcut) should always
   // land you at the top of the new page rather than keeping the old scroll.
   useEffect(() => { window.scrollTo(0, 0); }, [view]);
+
+  // On the installed PWA, hold the launch splash for a minimum beat so it doesn't
+  // flash past, and so the native launch splash → streamed loading.tsx splash →
+  // this one read as a single uninterrupted screen rather than handing off to a
+  // second, different spinner. A browser tab has no native splash to bridge, so we
+  // skip the floor there and just show the splash until data is in.
+  const [minSplash, setMinSplash] = useState(true);
+  useEffect(() => {
+    const standalone =
+      typeof window !== "undefined" &&
+      (window.matchMedia?.("(display-mode: standalone)").matches ||
+        (navigator as { standalone?: boolean }).standalone === true);
+    if (!standalone) { setMinSplash(false); return; }
+    const t = setTimeout(() => setMinSplash(false), 2000);
+    return () => clearTimeout(t);
+  }, []);
 
   // Pop a toast whenever you cross an achievement tier. Gated on !loading so the
   // baseline is taken from fully-loaded data (no notification spam on first load).
@@ -191,9 +208,9 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
     return [...list].sort(cmp[sort]);
   }, [games, q, status, platform, playFilter, playerFilter, sort]);
 
-  if (loading) {
-    return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", color: "var(--ink-dim)" }}><Loader2 size={26} className="spin" /></div>;
-  }
+  // Same Splash the native launch image and loading.tsx render, so the data-load
+  // wait is visually continuous with them — one splash, not two stacked loaders.
+  if (loading || minSplash) return <Splash />;
 
   const topbar = (floating: boolean) => (
     <TopBar floating={floating} currentUser={me} userMenu={userMenu} setUserMenu={setUserMenu}
