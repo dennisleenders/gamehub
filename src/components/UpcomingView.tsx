@@ -214,16 +214,8 @@ export default function UpcomingView({ games, loading, error, wishlistIds, owned
 
   return (
     <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 26 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 2 }}>
-        <CalendarClock size={20} color="var(--accent3)" />
-        <div>
-          <div style={{ fontFamily: "var(--display)", fontSize: 20, fontWeight: 700, letterSpacing: 0.5 }}>UPCOMING</div>
-          <div style={{ fontSize: 12, color: "var(--ink-dim)", marginTop: 2 }}>Releases over the next 6 months</div>
-        </div>
-      </div>
-
       {hasGames && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: -10 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 10 }}>
             <div style={{ flex: "1 1 150px", minWidth: 0 }}>
               <Filter label="SYSTEM" value={system} onChange={setSystem}

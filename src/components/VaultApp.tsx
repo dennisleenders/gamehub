@@ -5,7 +5,7 @@ import {
   Search, Plus, X, Gamepad2, Trophy, Heart, Disc, LayoutGrid, Sparkles, Check, Box, CircleUser,
   ChevronLeft, ChevronRight, ChevronDown, Pencil, Loader2, ImageIcon, Library, Joystick,
   ScanLine, Settings, LogOut, Clock, Tag, Star, CalendarClock, Play, Minus,
-  Home, Ticket, Copy, RefreshCw, Crown, UserMinus, Trash2, Users,
+  Home, Ticket, Copy, RefreshCw, Crown, UserMinus, Trash2, Users, Grid2x2, List,
 } from "lucide-react";
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
@@ -56,6 +56,16 @@ const progressEntries = (g: Game) => Object.entries(g.progress || {});
 const playersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status === "playing");
 const finishersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status === "finished");
 const abandonersOf = (g: Game) => progressEntries(g).filter(([, p]) => p.status === "abandoned");
+
+// Grid-density / list toggle for the collection, mirroring the Upcoming view.
+// `col` feeds an auto-fill template so column count tracks the viewport; list
+// mode ignores it and renders stacked rows.
+const COLLECTION_LAYOUTS = [
+  { key: "comfortable", Icon: Grid2x2, col: "minmax(150px, 1fr)", gap: "18px 14px" },
+  { key: "standard", Icon: LayoutGrid, col: "minmax(100px, 1fr)", gap: "16px 12px" },
+  { key: "list", Icon: List, col: "", gap: "" },
+] as const;
+type CollectionLayout = (typeof COLLECTION_LAYOUTS)[number]["key"];
 
 export default function VaultApp({ currentUser, household, role }: { currentUser: Profile; household: Household; role: HouseholdRole }) {
   const uid = currentUser.id;
@@ -120,6 +130,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
   const [playerFilter, setPlayerFilter] = useState("all");
   const [platform, setPlatform] = useState("all");
   const [sort, setSort] = useState("recent");
+  const [layout, setLayout] = useState<CollectionLayout>("standard");
 
   const owned = games.filter((g) => g.status === "owned");
   const wishlist = games.filter((g) => g.status === "wishlist");
@@ -194,7 +205,12 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
       if (playActive) {
         if (g.status !== "owned") return false;
         if (playerFilter === "all") {
-          if (!progressEntries(g).some(([, p]) => p.status === playFilter)) return false;
+          if (playFilter === "collection") {
+            // "In Collection" for everyone = nobody has an active status. A
+            // missing row defaults to collection, so we only need to ensure no
+            // stored row is playing/finished/abandoned/backlog.
+            if (progressEntries(g).some(([, p]) => p.status !== "collection")) return false;
+          } else if (!progressEntries(g).some(([, p]) => p.status === playFilter)) return false;
         } else {
           const st = getProg(g, playerFilter).status;
           if (playFilter === "all") { if (st === "collection") return false; }
@@ -221,6 +237,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
       onScan={() => setScanOpen(true)}
       onSettings={() => setSettingsOpen(true)}
       onChooseAvatar={() => setAvatarOpen(true)}
+      onHome={() => setView("home")}
       onAdd={() => setEditing({})} />
   );
 
@@ -232,7 +249,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
             <ImmersiveHero slides={playingSlides} userById={userById} currentUser={currentUser} onOpen={setDetail} />
             <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 20 }}>{topbar(true)}</div>
           </div>
-          <div style={{ position: "relative", maxWidth: 940, margin: "-1px auto 0", background: "var(--bg)", padding: "24px 16px 110px" }}>
+          <div style={{ position: "relative", maxWidth: 940, margin: "-1px auto 0", background: "var(--bg)", padding: "16px 16px 110px" }}>
             <div className="fade home-col" style={{ display: "flex", flexDirection: "column", gap: 26 }}>
               <section>
                 <div style={{ fontSize: 11, letterSpacing: 2, color: "var(--ink-dim)", fontFamily: "var(--display)", marginBottom: 14 }}>YOUR COLLECTION</div>
@@ -356,6 +373,8 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
         <div style={{ position: "relative", maxWidth: 940, margin: "0 auto", padding: "0 16px 110px" }}>
           {topbar(false)}
           <div className="fade">
+            <div style={{ height: 1, background: "linear-gradient(to right, transparent, var(--line) 12%, var(--line) 88%, transparent)", margin: "0 0 18px" }} />
+            <h1 style={{ fontFamily: "var(--display)", fontSize: 28, fontWeight: 800, letterSpacing: -0.5, margin: "2px 2px 16px" }}>Collection</h1>
             <div style={{ display: "flex", alignItems: "center", gap: 10, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: "11px 14px", marginBottom: 12 }}>
               <Search size={18} color="var(--ink-dim)" />
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search titles…"
@@ -363,9 +382,9 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
               {q && <button onClick={() => setQ("")} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)" }}><X size={16} /></button>}
             </div>
             <div className="filter-grid">
-              <FilterField label="Library" value={status} onChange={setStatus} options={[["all", "All games"], ["owned", "Owned"], ["wishlist", "Wishlist"]]} />
-              <FilterField label="Player" value={playerFilter} onChange={setPlayerFilter} options={[["all", "Any player"], ...profiles.map((a) => [a.id, a.name] as [string, string])]} />
-              <FilterField label="Played" value={playFilter} onChange={setPlayFilter} options={[["all", "Any status"], ["playing", "Playing"], ["finished", "Finished"], ["backlog", "Backlog"], ["abandoned", "Abandoned"], ["collection", "In Collection"]]} />
+              <FilterField label="Library" value={status} onChange={(v) => { setStatus(v); if (v === "wishlist") { setPlayerFilter("all"); setPlayFilter("all"); } }} options={[["all", "All games"], ["owned", "Owned"], ["wishlist", "Wishlist"]]} />
+              <FilterField label="Player" value={playerFilter} onChange={setPlayerFilter} disabled={status === "wishlist"} options={[["all", "All players"], ...profiles.map((a) => [a.id, a.name] as [string, string])]} />
+              <FilterField label="Status" value={playFilter} onChange={setPlayFilter} disabled={status === "wishlist"} options={[["all", "Any status"], ["playing", "Playing"], ["finished", "Finished"], ["backlog", "Backlog"], ["abandoned", "Abandoned"], ["collection", "In Collection"]]} />
               <FilterField label="System" value={platform} onChange={setPlatform} options={[["all", "All systems"], ...PLATFORMS.map((p) => [p, p] as [string, string])]} />
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "14px 2px 16px", gap: 12 }}>
@@ -378,15 +397,29 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
                   </button>
                 )}
               </div>
-              <FilterField compact value={sort} onChange={setSort} options={[["recent", "Newest"], ["name", "A–Z"], ["value", "Value"], ["rating", "Rating"]]} />
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 4, height: 38, boxSizing: "border-box", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: 4 }}>
+                  {COLLECTION_LAYOUTS.map(({ key, Icon }) => (
+                    <button key={key} onClick={() => setLayout(key)} aria-label={key === "list" ? "List view" : `${key} grid`} aria-pressed={layout === key}
+                      className="layout-btn" style={{ background: layout === key ? "var(--accent2)" : "transparent", color: layout === key ? "var(--bg)" : "var(--ink-dim)" }}>
+                      <Icon size={17} />
+                    </button>
+                  ))}
+                </div>
+                <FilterField compact value={sort} onChange={setSort} options={[["recent", "Newest"], ["name", "A–Z"], ["value", "Value"], ["rating", "Rating"]]} />
+              </div>
             </div>
             {filtered.length === 0 ? (
               <div style={{ textAlign: "center", padding: "60px 0", color: "var(--ink-dim)" }}>
                 <Disc size={40} style={{ opacity: .5 }} />
                 <div style={{ marginTop: 12, fontFamily: "var(--display)" }}>NO GAMES FOUND</div>
               </div>
+            ) : layout === "list" ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {filtered.map((g) => <GameRow key={g.id} g={g} profiles={profiles} onClick={() => setDetail(g)} />)}
+              </div>
             ) : (
-              <div className="card-grid">
+              <div className="card-grid" style={{ gridTemplateColumns: `repeat(auto-fill, ${COLLECTION_LAYOUTS.find((l) => l.key === layout)!.col})`, gap: COLLECTION_LAYOUTS.find((l) => l.key === layout)!.gap }}>
                 {filtered.map((g) => <GameCard key={g.id} g={g} profiles={profiles} onClick={() => setDetail(g)} />)}
               </div>
             )}
@@ -406,6 +439,10 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
       {view === "upcoming" && (
         <div style={{ position: "relative", maxWidth: 940, margin: "0 auto", padding: "0 16px 110px" }}>
           {topbar(false)}
+          <div className="fade">
+            <div style={{ height: 1, background: "linear-gradient(to right, transparent, var(--line) 12%, var(--line) 88%, transparent)", margin: "0 0 18px" }} />
+            <h1 style={{ fontFamily: "var(--display)", fontSize: 28, fontWeight: 800, letterSpacing: -0.5, margin: "2px 2px 16px" }}>Upcoming</h1>
+          </div>
           <UpcomingView games={upcoming} loading={upcomingLoading} error={upcomingError} wishlistIds={wishlistIgdbIds} ownedIds={ownedIgdbIds} onWishlist={wishlistUpcoming} onUnwishlist={unwishlistUpcoming} onOpen={setUpcomingDetail} />
         </div>
       )}
@@ -531,15 +568,44 @@ function GameCard({ g, profiles, onClick }: { g: Game; profiles: Profile[]; onCl
   );
 }
 
-function FilterField({ label, value, onChange, options, compact }: { label?: string; value: string; onChange: (v: string) => void; options: [string, string][]; compact?: boolean }) {
+// List-mode row for the collection: compact thumbnail, then title + platform,
+// with the value (or wishlist marker) trailing. Mirrors GameCard's data, laid wide.
+function GameRow({ g, profiles, onClick }: { g: Game; profiles: Profile[]; onClick: () => void }) {
+  const tint = tintFor(g.platform);
+  const [err, setErr] = useState(false);
+  const showArt = g.cover && !err;
+  const finishers = finishersOf(g).map(([id]) => profiles.find((a) => a.id === id)).filter(Boolean) as Profile[];
+  const players = playersOf(g).map(([id]) => profiles.find((a) => a.id === id)).filter(Boolean) as Profile[];
+  const abandoners = abandonersOf(g).map(([id]) => profiles.find((a) => a.id === id)).filter(Boolean) as Profile[];
+  return (
+    <button onClick={onClick} className="game-card" style={{ display: "flex", alignItems: "center", gap: 13, padding: "9px 14px 9px 9px", borderRadius: "var(--radius)", background: "var(--panel)", border: "1px solid var(--line)", minWidth: 0, width: "100%", textAlign: "left", color: "var(--ink)" }}>
+      <div style={{ flex: "0 0 auto", width: 42, aspectRatio: "1 / 1.32", borderRadius: 7, overflow: "hidden", position: "relative", border: "1px solid var(--line)", background: `linear-gradient(150deg, ${tint}33, var(--panel-alt))` }}>
+        {showArt ? <img src={g.cover!} alt={g.title} loading="lazy" onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          : <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}><span style={{ fontFamily: "var(--display)", fontSize: 16, color: tint, opacity: .5 }}>{(g.title || "?")[0]}</span></div>}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.25, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.title}</div>
+        <div style={{ fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--display)", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.platform}{g.year ? ` · ${g.year}` : ""}</div>
+      </div>
+      <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 4 }}>
+        {g.status === "wishlist" && <span title="Wishlist" style={{ display: "grid", placeItems: "center", width: 19, height: 19, borderRadius: 99, background: "#13111aea", border: "1.5px solid var(--accent)" }}><Heart size={11} color="var(--accent)" fill="var(--accent)" /></span>}
+        {players.map((u) => <span key={"p" + u.id} title={`${u.name} playing`} style={{ display: "grid", placeItems: "center", width: 19, height: 19, borderRadius: 99, background: "#13111aea", border: `1.5px solid ${u.color}` }}><span className="pulse" style={{ width: 7, height: 7, borderRadius: 99, background: u.color }} /></span>)}
+        {finishers.map((u) => <span key={"f" + u.id} title={`${u.name} finished`} style={{ display: "grid", placeItems: "center", width: 19, height: 19, borderRadius: 99, background: u.color, border: "1.5px solid var(--bg)" }}><Check size={11} color="var(--bg)" strokeWidth={3.5} /></span>)}
+        {abandoners.map((u) => <span key={"a" + u.id} title={`${u.name} abandoned`} style={{ display: "grid", placeItems: "center", width: 19, height: 19, borderRadius: 99, background: "#13111aea", border: "1.5px solid var(--bad)" }}><X size={11} color="var(--bad)" strokeWidth={3.5} /></span>)}
+      </div>
+    </button>
+  );
+}
+
+function FilterField({ label, value, onChange, options, compact, disabled }: { label?: string; value: string; onChange: (v: string) => void; options: [string, string][]; compact?: boolean; disabled?: boolean }) {
   const current = options.find(([v]) => v === value)?.[1] ?? value;
   return (
-    <label style={{ position: "relative", display: "flex", flexDirection: "column", gap: compact ? 0 : 4, cursor: "pointer", minWidth: 0 }}>
+    <label style={{ position: "relative", display: "flex", flexDirection: "column", gap: compact ? 0 : 4, cursor: disabled ? "not-allowed" : "pointer", minWidth: 0, opacity: disabled ? .45 : 1 }}>
       {label && <span style={{ fontSize: 9, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, paddingLeft: 2 }}>{label.toUpperCase()}</span>}
-      <div style={{ position: "relative", display: "flex", alignItems: "center", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: compact ? "8px 30px 8px 12px" : "10px 30px 10px 13px" }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", boxSizing: "border-box", height: compact ? 38 : undefined, padding: compact ? "0 30px 0 12px" : "10px 30px 10px 13px" }}>
         <span style={{ fontSize: compact ? 12 : 13.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontFamily: compact ? "var(--display)" : "var(--body)" }}>{current}</span>
         <ChevronDown size={15} color="var(--ink-dim)" style={{ position: "absolute", right: 10, pointerEvents: "none" }} />
-        <select value={value} onChange={(e) => onChange(e.target.value)} style={{ position: "absolute", inset: 0, opacity: 0, width: "100%", height: "100%", cursor: "pointer", border: "none", appearance: "none" }}>
+        <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} style={{ position: "absolute", inset: 0, opacity: 0, width: "100%", height: "100%", cursor: disabled ? "not-allowed" : "pointer", border: "none", appearance: "none" }}>
           {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
       </div>
@@ -547,7 +613,7 @@ function FilterField({ label, value, onChange, options, compact }: { label?: str
   );
 }
 
-function TopBar({ floating, currentUser, userMenu, setUserMenu, onScan, onSettings, onChooseAvatar, onAdd }: any) {
+function TopBar({ floating, currentUser, userMenu, setUserMenu, onScan, onSettings, onChooseAvatar, onHome, onAdd }: any) {
   const glass = floating
     ? { background: "rgba(20,17,26,0.34)", border: "1px solid rgba(255,255,255,0.14)", backdropFilter: "blur(10px)" as const }
     : { background: "var(--panel)", border: "1px solid var(--line)" };
@@ -555,7 +621,7 @@ function TopBar({ floating, currentUser, userMenu, setUserMenu, onScan, onSettin
   const myAvatar = avatarSrc(currentUser.avatar);
   return (
     <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: floating ? "calc(16px + env(safe-area-inset-top)) 16px 14px" : "calc(16px + env(safe-area-inset-top)) 0 16px", position: "relative" }}>
-      <div style={{ fontFamily: "var(--display)", fontSize: 19, letterSpacing: 1.5, fontWeight: 700, color: floating ? "#fff" : "var(--ink)", textShadow: floating ? "0 2px 12px rgba(0,0,0,0.5)" : "none" }}>GAMEVAULT</div>
+      <button onClick={onHome} aria-label="Go to dashboard" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "var(--display)", fontSize: 19, letterSpacing: 1.5, fontWeight: 700, color: floating ? "#fff" : "var(--ink)", textShadow: floating ? "0 2px 12px rgba(0,0,0,0.5)" : "none" }}>GAMEVAULT</button>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <button onClick={onScan} aria-label="Scan" style={iconBtn}><ScanLine size={18} /></button>
         <button onClick={onSettings} aria-label="Settings" style={iconBtn}><Settings size={18} /></button>
@@ -621,7 +687,7 @@ function ImmersiveHero({ slides, userById, currentUser, onOpen }: { slides: { g:
   }
 
   return (
-    <div style={{ position: "relative", height: "78vh", minHeight: 520, maxHeight: 820 }}>
+    <div style={{ position: "relative", height: "81vh", minHeight: 520, maxHeight: 820 }}>
       <div ref={trackRef} onScroll={onScroll} className="hero-track" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} style={{ cursor: slides.length > 1 ? "grab" : "default" }}>
         {slides.map((s) => <HeroSlide key={s.g.id + ":" + s.pid} g={s.g} hours={s.hours} player={userById(s.pid)} currentUser={currentUser} onOpen={openGuarded} />)}
       </div>
@@ -644,10 +710,10 @@ function HeroSlide({ g, hours, player, currentUser, onOpen }: { g: Game; hours: 
   return (
     <div className="hero-slide">
       <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
-        {showArt ? <img src={g.cover!} alt="" aria-hidden style={{ width: "100%", height: "100%", objectFit: "cover", transform: "scale(1.25)", filter: "blur(28px) saturate(1.2) brightness(.6)" }} /> : <div style={{ position: "absolute", inset: 0, background: `linear-gradient(160deg, ${tint}55, var(--bg))` }} />}
+        {showArt ? <img src={g.cover!} alt="" aria-hidden style={{ width: "100%", height: "100%", objectFit: "cover", transform: "scale(1.25)", filter: "blur(10px) saturate(1.2) brightness(.6)" }} /> : <div style={{ position: "absolute", inset: 0, background: `linear-gradient(160deg, ${tint}55, var(--bg))` }} />}
       </div>
-      <div onClick={() => onOpen(g)} role="button" aria-label={`Open ${g.title}`} style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", cursor: "pointer" }}>
-        {showArt ? <img src={g.cover!} alt={g.title} onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontFamily: "var(--display)", fontSize: 96, color: tint, opacity: .5 }}>{(g.title || "?")[0]}</span>}
+      <div onClick={() => onOpen(g)} role="button" aria-label={`Open ${g.title}`} style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: "5% 24px 52%", cursor: "pointer" }}>
+        {showArt ? <img src={g.cover!} alt={g.title} onError={() => setErr(true)} style={{ width: "auto", height: "auto", maxWidth: "min(74%, 340px)", maxHeight: "100%", objectFit: "contain", borderRadius: 16, border: "1px solid rgba(255,255,255,0.18)", boxShadow: "0 24px 64px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.4)" }} /> : <span style={{ fontFamily: "var(--display)", fontSize: 96, color: tint, opacity: .5 }}>{(g.title || "?")[0]}</span>}
       </div>
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "linear-gradient(to top, #13111a 0%, rgba(19,17,26,0.82) 34%, rgba(19,17,26,0.12) 64%, rgba(19,17,26,0.28) 100%)" }} />
       <button onClick={() => onOpen(g)} style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "0 20px 54px", textAlign: "left", background: "none", border: "none", cursor: "pointer", color: "#fff", width: "100%" }}>
