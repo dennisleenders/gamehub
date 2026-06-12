@@ -3,6 +3,7 @@
 import { useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { CalendarClock, Loader2, Heart, ChevronDown, Grid2x2, LayoutGrid, List, X } from "lucide-react";
 import type { UpcomingGame } from "@/lib/types";
+import { useLazyList } from "@/lib/useLazyList";
 
 // Display modes for the Upcoming view: two grid densities + a list. For the grids,
 // `col` drives an auto-fill template so the column count follows the viewport
@@ -207,6 +208,21 @@ export default function UpcomingView({ games, loading, error, wishlistIds, owned
     return [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([, v]) => v);
   }, [filtered]);
 
+  // Reveal releases in pages so a long list paints fast. The budget is spread
+  // across the month groups in order, dropping trailing groups once spent.
+  const { count: shownCount, sentinel } = useLazyList(filtered.length, `${system} ${wish} ${players} ${mpType}`);
+  const visibleGroups = useMemo(() => {
+    let budget = shownCount;
+    const out: { label: string; total: number; games: UpcomingGame[] }[] = [];
+    for (const m of groups) {
+      if (budget <= 0) break;
+      const slice = m.games.slice(0, budget);
+      budget -= slice.length;
+      out.push({ label: m.label, total: m.games.length, games: slice });
+    }
+    return out;
+  }, [groups, shownCount]);
+
   const cfg = LAYOUTS.find((l) => l.key === layout)!;
   const isList = layout === "list";
   const hasFilter = system !== "all" || wish !== "all" || players !== "all" || mpType !== "all";
@@ -269,24 +285,27 @@ export default function UpcomingView({ games, loading, error, wishlistIds, owned
           <div style={{ fontSize: 12.5, marginTop: 6 }}>{hasFilter ? "No releases match these filters." : "No tracked releases in the next 6 months."}</div>
         </div>
       ) : (
-        groups.map((m) => (
-          <section key={m.label}>
-            <div style={{ display: "flex", alignItems: "center", gap: 13, marginBottom: 18, paddingTop: 4 }}>
-              <span style={{ fontFamily: "var(--display)", fontSize: 18, fontWeight: 700, letterSpacing: 1 }}>{m.label}</span>
-              <span style={{ fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>{m.games.length} {m.games.length === 1 ? "game" : "games"}</span>
-              <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
-            </div>
-            {isList ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {m.games.map((g) => <UpcomingRow key={g.igdbId} g={g} wishlisted={isWished(g)} owned={isOwned(g)} onWishlist={onWishlist} onUnwishlist={onUnwishlist} onClick={() => onOpen?.(g)} />)}
+        <>
+          {visibleGroups.map((m) => (
+            <section key={m.label}>
+              <div style={{ display: "flex", alignItems: "center", gap: 13, marginBottom: 18, paddingTop: 4 }}>
+                <span style={{ fontFamily: "var(--display)", fontSize: 18, fontWeight: 700, letterSpacing: 1 }}>{m.label}</span>
+                <span style={{ fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>{m.total} {m.total === 1 ? "game" : "games"}</span>
+                <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
               </div>
-            ) : (
-              <div className="card-grid" style={{ gridTemplateColumns: `repeat(auto-fill, ${cfg.col})`, gap: cfg.gap }}>
-                {m.games.map((g) => <UpcomingCard key={g.igdbId} g={g} wishlisted={isWished(g)} owned={isOwned(g)} onWishlist={onWishlist} onUnwishlist={onUnwishlist} onClick={() => onOpen?.(g)} />)}
-              </div>
-            )}
-          </section>
-        ))
+              {isList ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {m.games.map((g) => <UpcomingRow key={g.igdbId} g={g} wishlisted={isWished(g)} owned={isOwned(g)} onWishlist={onWishlist} onUnwishlist={onUnwishlist} onClick={() => onOpen?.(g)} />)}
+                </div>
+              ) : (
+                <div className="card-grid" style={{ gridTemplateColumns: `repeat(auto-fill, ${cfg.col})`, gap: cfg.gap }}>
+                  {m.games.map((g) => <UpcomingCard key={g.igdbId} g={g} wishlisted={isWished(g)} owned={isOwned(g)} onWishlist={onWishlist} onUnwishlist={onUnwishlist} onClick={() => onOpen?.(g)} />)}
+                </div>
+              )}
+            </section>
+          ))}
+          {shownCount < filtered.length && <div ref={sentinel} style={{ height: 1 }} />}
+        </>
       )}
     </div>
   );

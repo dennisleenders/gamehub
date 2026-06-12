@@ -25,7 +25,7 @@ button, select, a, [role="button"] { touch-action: manipulation; }
 /* iOS auto-zooms the page when focusing a field whose text is < 16px. Pinning
    every form control to 16px is the only reliable way to stop that zoom. */
 input, select, textarea { font-size: 16px !important; }
-button, [role="button"] { -webkit-tap-highlight-color: transparent; }
+button, [role="button"], select, a, label, input { -webkit-tap-highlight-color: transparent; }
 /* App-like polish, scoped to the INSTALLED standalone PWA only — never a normal
    browser tab or the device-mode emulator. Kills the rubber-band/pull-to-refresh
    overscroll and the iOS long-press callout/selection (fields stay selectable). */

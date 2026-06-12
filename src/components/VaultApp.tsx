@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Search, Plus, X, Gamepad2, Trophy, Heart, Disc, LayoutGrid, Sparkles, Check, Box, CircleUser,
   ChevronLeft, ChevronRight, ChevronDown, Pencil, Loader2, ImageIcon, Library, Joystick,
@@ -11,6 +11,7 @@ import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser"
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { useVault } from "@/lib/useVault";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
+import { useLazyList } from "@/lib/useLazyList";
 import AchievementsView, { CreateChallengeModal, RankingBoard } from "@/components/AchievementsView";
 import UpcomingView, { UpcomingRail, UpcomingCover } from "@/components/UpcomingView";
 import { useUpcoming } from "@/lib/useUpcoming";
@@ -130,7 +131,28 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
   const [playerFilter, setPlayerFilter] = useState("all");
   const [platform, setPlatform] = useState("all");
   const [sort, setSort] = useState("recent");
-  const [layout, setLayout] = useState<CollectionLayout>("standard");
+  const [layout, setLayout] = useState<CollectionLayout>("comfortable");
+
+  // Bottom-nav "orb": one accent pill that slides to the active tab instead of a
+  // per-button background. Positions are measured (labels make the buttons
+  // unequal widths), and re-measured on resize / font load.
+  const navTrackRef = useRef<HTMLDivElement>(null);
+  const navBtnRef = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [orb, setOrb] = useState({ left: 0, top: 0, width: 0, height: 0 });
+  const measureOrb = useCallback((v: string) => {
+    const btn = navBtnRef.current[v];
+    if (!btn) return;
+    setOrb({ left: btn.offsetLeft, top: btn.offsetTop, width: btn.offsetWidth, height: btn.offsetHeight });
+  }, []);
+  // Snap before paint on tab change (no first-frame slide from 0,0); re-measure
+  // when the layout shifts (resize crosses the label breakpoint, fonts settle).
+  useLayoutEffect(() => { measureOrb(view); }, [view, measureOrb]);
+  useEffect(() => {
+    const onResize = () => measureOrb(view);
+    window.addEventListener("resize", onResize);
+    document.fonts?.ready.then(onResize).catch(() => {});
+    return () => window.removeEventListener("resize", onResize);
+  }, [view, measureOrb]);
 
   const owned = games.filter((g) => g.status === "owned");
   const wishlist = games.filter((g) => g.status === "wishlist");
@@ -227,6 +249,12 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
     };
     return [...list].sort(cmp[sort]);
   }, [games, q, status, platform, playFilter, playerFilter, sort]);
+
+  // Render the collection in pages so a large library paints fast; more reveal
+  // as the sentinel scrolls into view. The reset key is a stable string of the
+  // active filters (NOT the `filtered` array) so a background re-render that
+  // hands us a fresh `games` reference can't keep snapping us back to page one.
+  const { count: shownCount, sentinel: collSentinel } = useLazyList(filtered.length, `${q} ${status} ${platform} ${playFilter} ${playerFilter} ${sort}`);
 
   // Same Splash the native launch image and loading.tsx render, so the data-load
   // wait is visually continuous with them — one splash, not two stacked loaders.
@@ -416,13 +444,14 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
               </div>
             ) : layout === "list" ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {filtered.map((g) => <GameRow key={g.id} g={g} profiles={profiles} onClick={() => setDetail(g)} />)}
+                {filtered.slice(0, shownCount).map((g) => <GameRow key={g.id} g={g} profiles={profiles} onClick={() => setDetail(g)} />)}
               </div>
             ) : (
               <div className="card-grid" style={{ gridTemplateColumns: `repeat(auto-fill, ${COLLECTION_LAYOUTS.find((l) => l.key === layout)!.col})`, gap: COLLECTION_LAYOUTS.find((l) => l.key === layout)!.gap }}>
-                {filtered.map((g) => <GameCard key={g.id} g={g} profiles={profiles} onClick={() => setDetail(g)} />)}
+                {filtered.slice(0, shownCount).map((g) => <GameCard key={g.id} g={g} profiles={profiles} onClick={() => setDetail(g)} />)}
               </div>
             )}
+            {shownCount < filtered.length && <div ref={collSentinel} style={{ height: 1 }} />}
           </div>
         </div>
       )}
@@ -430,6 +459,10 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
       {view === "achievements" && (
         <div style={{ position: "relative", maxWidth: 940, margin: "0 auto", padding: "0 16px 110px" }}>
           {topbar(false)}
+          <div className="fade">
+            <div style={{ height: 1, background: "linear-gradient(to right, transparent, var(--line) 12%, var(--line) 88%, transparent)", margin: "0 0 18px" }} />
+            <h1 style={{ fontFamily: "var(--display)", fontSize: 28, fontWeight: 800, letterSpacing: -0.5, margin: "2px 2px 16px" }}>Achievements</h1>
+          </div>
           <AchievementsView games={games} profiles={profiles} challenges={challenges} currentUser={me}
             deleteChallenge={deleteChallenge}
             onCreateChallenge={() => setCreatingChallenge(true)} />
@@ -449,12 +482,15 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
 
       <nav style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 30, display: "flex", justifyContent: "center",
         padding: "10px 16px calc(10px + env(safe-area-inset-bottom))", background: "linear-gradient(to top, var(--bg) 60%, transparent)", pointerEvents: "none" }}>
-        <div style={{ display: "flex", gap: 6, background: "var(--panel)", padding: 5, borderRadius: 99, border: "1px solid var(--line)", boxShadow: "0 8px 28px -8px #000", pointerEvents: "auto" }}>
+        <div ref={navTrackRef} style={{ position: "relative", display: "flex", gap: 6, background: "var(--panel)", padding: 5, borderRadius: 99, border: "1px solid var(--line)", boxShadow: "0 8px 28px -8px #000", pointerEvents: "auto" }}>
+          <div aria-hidden style={{ position: "absolute", left: orb.left, top: orb.top, width: orb.width, height: orb.height,
+            borderRadius: 99, background: "var(--accent)", zIndex: 0, opacity: orb.width ? 1 : 0,
+            transition: "left .34s cubic-bezier(.2,.85,.25,1), top .34s cubic-bezier(.2,.85,.25,1), width .34s cubic-bezier(.2,.85,.25,1), height .34s cubic-bezier(.2,.85,.25,1)" }} />
           {([["home", "DASHBOARD", CircleUser], ["collection", "COLLECTION", LayoutGrid], ["upcoming", "UPCOMING", CalendarClock], ["achievements", "ACHIEVEMENTS", Trophy]] as const).map(([k, lbl, Ic]) => (
-            <button key={k} onClick={() => setView(k)} aria-label={lbl} className="nav-pill"
-              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: "none", cursor: "pointer",
-                borderRadius: 99, fontFamily: "var(--display)", fontWeight: 700, fontSize: 12, letterSpacing: 1,
-                background: view === k ? "var(--accent)" : "transparent", color: view === k ? "var(--bg)" : "var(--ink-dim)" }}>
+            <button key={k} ref={(el) => { navBtnRef.current[k] = el; }} onClick={() => setView(k)} aria-label={lbl} className="nav-pill"
+              style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: "none", cursor: "pointer",
+                borderRadius: 99, fontFamily: "var(--display)", fontWeight: 700, fontSize: 12, letterSpacing: 1, background: "transparent",
+                color: view === k ? "var(--bg)" : "var(--ink-dim)", transition: "color .2s ease" }}>
               <Ic size={15} strokeWidth={2.5} /> <span className="nav-label">{lbl}</span>
             </button>
           ))}
