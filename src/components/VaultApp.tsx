@@ -87,7 +87,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
   const upcomingEnabled = showSection("upcoming") || view === "upcoming";
   const { games: upcoming, loading: upcomingLoading, error: upcomingError } = useUpcoming(upcomingEnabled);
 
-  const resolveUpc = async (upc: string): Promise<{ title: string | null; error?: string; price?: PricePayload | null; pricecharting_id?: string | null }> => {
+  const resolveUpc = async (upc: string): Promise<{ title: string | null; error?: string; resetAt?: number; price?: PricePayload | null; pricecharting_id?: string | null }> => {
     const r = await fetch("/api/upc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ upc }) });
     if (!r.ok) return { title: null, error: "network" };
     return r.json();
@@ -1729,7 +1729,7 @@ const SCAN_CONSTRAINTS: MediaStreamConstraints = {
 };
 
 function ScannerModal({ resolve, onResolved, onClose }: {
-  resolve: (upc: string) => Promise<{ title: string | null; error?: string; price?: PricePayload | null; pricecharting_id?: string | null }>;
+  resolve: (upc: string) => Promise<{ title: string | null; error?: string; resetAt?: number; price?: PricePayload | null; pricecharting_id?: string | null }>;
   onResolved: (res: ScanResult) => void;
   onClose: () => void;
 }) {
@@ -1786,8 +1786,16 @@ function ScannerModal({ resolve, onResolved, onClose }: {
       const r = await resolve(code);
       if (r?.title) { onResolved({ title: r.title, upc: code, price: r.price ?? null, pricecharting_id: r.pricecharting_id ?? null }); return; }
       lastFailedRef.current = code; // don't loop-beep the same unmatched barcode
+      // X-RateLimit-Reset may arrive as an absolute epoch (seconds) or as
+      // seconds-until-reset; large values are clearly an epoch, small ones a delta.
+      const raw = r?.resetAt ?? 0;
+      const resetMs = raw > 1e6 ? raw * 1000 : raw ? Date.now() + raw * 1000 : 0;
+      const resetHint = resetMs
+        ? ` Resets around ${new Date(resetMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`
+        : "";
       setNote(
-        r?.error === "rate_limited" ? "Daily lookup limit reached — type the title below instead." :
+        r?.error === "too_fast" ? "Scanning too fast — wait a few seconds, then scan again." :
+        r?.error === "rate_limited" ? `Daily lookup limit reached — type the title below instead.${resetHint}` :
         r?.error === "invalid" ? "That barcode looks invalid — re-check the digits." :
         r?.error === "network" ? "Lookup failed (network) — try again." :
         "No match in the barcode database — type the title below."

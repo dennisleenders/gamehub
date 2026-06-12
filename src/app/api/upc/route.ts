@@ -44,16 +44,25 @@ async function fromLevelComplete(code: string): Promise<string | null> {
   }
 }
 
-// Fallback: broad general-product DB. Distinguishes rate-limit vs invalid vs miss.
-async function fromUpcItemDb(code: string): Promise<{ title: string | null; error?: string }> {
+// Fallback: broad general-product DB. Distinguishes the two throttles UPCitemdb
+// applies — TOO_FAST is a short per-minute burst limit that clears in seconds,
+// EXCEED_LIMIT is the ~100/day quota — plus invalid vs miss. The daily quota is
+// IP-based and shared across the host, so on a serverless host like Vercel it can
+// read as exhausted even when this app made few lookups. X-RateLimit-Reset is a
+// Unix epoch (seconds) for when the daily window rolls over; we pass it through
+// so the UI can tell the user when scanning resumes.
+async function fromUpcItemDb(code: string): Promise<{ title: string | null; error?: string; resetAt?: number }> {
   try {
     const r = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${code}`, {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(8000),
     });
-    if (r.status === 429) return { title: null, error: "rate_limited" };
+    const resetAt = Number(r.headers.get("x-ratelimit-reset")) || undefined;
     const data = await r.json().catch(() => null);
-    if (data?.code === "EXCEED_LIMIT" || data?.code === "TOO_FAST") return { title: null, error: "rate_limited" };
+    // Order matters: a TOO_FAST 429 carries that code in the body, so check it
+    // before the bare-429 daily-cap fallback below.
+    if (data?.code === "TOO_FAST") return { title: null, error: "too_fast", resetAt };
+    if (data?.code === "EXCEED_LIMIT" || r.status === 429) return { title: null, error: "rate_limited", resetAt };
     if (data?.code === "INVALID_UPC") return { title: null, error: "invalid" };
     return { title: data?.items?.[0]?.title ?? null };
   } catch {
