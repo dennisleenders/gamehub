@@ -8,3 +8,6 @@ out
 .vercel
 supabase/.branches
 supabase/.temp
+
+# local database backups (contains user data — never commit)
+backup/

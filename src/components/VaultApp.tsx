@@ -28,7 +28,11 @@ const FALLBACK_TINTS = ["#9b8cff", "#6fc7b3", "#e6b667", "#e0738a", "#7fb2ff", "
 const hashIdx = (s = "", n = 1) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 9973; return h % n; };
 const tintFor = (p: string) => PLATFORM_TINT[p] || FALLBACK_TINTS[hashIdx(p, FALLBACK_TINTS.length)];
 const playColor = (k: string) => k === "playing" ? "var(--accent2)" : k === "finished" ? "var(--good)" : k === "abandoned" ? "var(--bad)" : "var(--ink-dim)";
-const getProg = (g: Game, uid?: string) => (uid && g.progress?.[uid]) || { status: "backlog" as PlayStatus, hours: 0 };
+const getProg = (g: Game, uid?: string) => (uid && g.progress?.[uid]) || { status: "collection" as PlayStatus, hours: 0 };
+// The neutral, no-intent statuses: a game just sitting in the vault ("collection")
+// or merely flagged to play someday ("backlog"). Neither counts as having played
+// it, so both are excluded from "recently played" and "who's played it".
+const isUnplayed = (s: PlayStatus) => s === "collection" || s === "backlog";
 // Condition is shown verbatim (Sealed / CIB / Loose) — the stored value is the label.
 const conditionLabel = (c?: string | null) => c ?? "";
 
@@ -167,7 +171,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
   // Games the current user has actually played (playing/finished), most recently touched first.
   const recentlyPlayed = owned
     .map((g) => ({ g, p: g.progress?.[uid] }))
-    .filter((x) => x.p && x.p.status !== "backlog" && x.p.updated_at)
+    .filter((x) => x.p && !isUnplayed(x.p.status) && x.p.updated_at)
     .sort((a, b) => (b.p!.updated_at! < a.p!.updated_at! ? -1 : 1))
     .map((x) => ({ g: x.g, p: x.p! }));
 
@@ -193,7 +197,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
           if (!progressEntries(g).some(([, p]) => p.status === playFilter)) return false;
         } else {
           const st = getProg(g, playerFilter).status;
-          if (playFilter === "all") { if (st === "backlog") return false; }
+          if (playFilter === "all") { if (st === "collection") return false; }
           else if (st !== playFilter) return false;
         }
       }
@@ -361,7 +365,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
             <div className="filter-grid">
               <FilterField label="Library" value={status} onChange={setStatus} options={[["all", "All games"], ["owned", "Owned"], ["wishlist", "Wishlist"]]} />
               <FilterField label="Player" value={playerFilter} onChange={setPlayerFilter} options={[["all", "Any player"], ...profiles.map((a) => [a.id, a.name] as [string, string])]} />
-              <FilterField label="Played" value={playFilter} onChange={setPlayFilter} options={[["all", "Any status"], ["playing", "Playing"], ["finished", "Finished"], ["backlog", "Backlog"], ["abandoned", "Abandoned"]]} />
+              <FilterField label="Played" value={playFilter} onChange={setPlayFilter} options={[["all", "Any status"], ["playing", "Playing"], ["finished", "Finished"], ["backlog", "Backlog"], ["abandoned", "Abandoned"], ["collection", "In Collection"]]} />
               <FilterField label="System" value={platform} onChange={setPlatform} options={[["all", "All systems"], ...PLATFORMS.map((p) => [p, p] as [string, string])]} />
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "14px 2px 16px", gap: 12 }}>
@@ -857,7 +861,7 @@ function DetailView({ game, userById, currentUser, onProgress, onClose, onEdit }
               <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", overflow: "hidden" }}>
                 {(() => {
                   const rows = progressEntries(g).map(([id, p]) => ({ u: userById(id), p, runs: g.playthroughs?.[id] ?? [] }))
-                    .filter((r) => r.u && (r.p.status !== "backlog" || r.runs.length))
+                    .filter((r) => r.u && (!isUnplayed(r.p.status) || r.runs.length))
                     .sort((a, b) => (a.p.status === "playing" ? 0 : 1) - (b.p.status === "playing" ? 0 : 1));
                   if (!rows.length) return <div style={{ padding: "14px 16px", fontSize: 13, color: "var(--ink-dim)" }}>Nobody&apos;s started this yet.</div>;
                   return rows.map(({ u, p, runs }, i) => {

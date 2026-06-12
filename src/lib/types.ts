@@ -1,6 +1,10 @@
 // Shared domain types + UI constants for GameVault.
 
-export type PlayStatus = "backlog" | "playing" | "finished" | "abandoned";
+// "collection" is the neutral default: the game is simply in the vault, with no
+// stated intent to play it. "backlog" is the opt-in "I want to play this someday"
+// list. The two are distinct so, in a shared household, a member can hold a game
+// neutrally while someone else has it backlogged or is playing it.
+export type PlayStatus = "collection" | "backlog" | "playing" | "finished" | "abandoned";
 
 // ---- HOUSEHOLDS (vaults) ---------------------------------------------------
 // A household is a self-contained vault. Each user belongs to exactly one. The
@@ -213,6 +217,7 @@ export const REGIONS = ["PAL", "NTSC-U", "NTSC-J"];
 export const DEFAULT_GENRES = ["RPG", "Action", "Platformer", "Horror", "Strategy", "Adventure"];
 
 export const PLAY_STATUS: Record<PlayStatus, { label: string; short: string }> = {
+  collection: { label: "In Collection", short: "COLLECTION" },
   backlog: { label: "Backlog", short: "BACKLOG" },
   playing: { label: "Playing", short: "PLAYING" },
   finished: { label: "Finished", short: "FINISHED" },

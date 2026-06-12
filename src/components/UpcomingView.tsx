@@ -9,7 +9,7 @@ import type { UpcomingGame } from "@/lib/types";
 // width; `col`/`gap` are unused by the list mode (rendered as stacked rows).
 const LAYOUTS = [
   { key: "comfortable", Icon: Grid2x2, col: "minmax(160px, 1fr)", gap: "18px 14px" },
-  { key: "standard", Icon: LayoutGrid, col: "minmax(110px, 1fr)", gap: "16px 12px" },
+  { key: "standard", Icon: LayoutGrid, col: "minmax(100px, 1fr)", gap: "16px 12px" },
   { key: "list", Icon: List, col: "", gap: "" },
 ] as const;
 type LayoutKey = (typeof LAYOUTS)[number]["key"];
