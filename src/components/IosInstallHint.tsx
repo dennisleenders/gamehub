@@ -28,8 +28,27 @@ export default function IosInstallHint() {
   useEffect(() => {
     if (!isIos() || isStandalone()) return;
     if (localStorage.getItem(DISMISS_KEY) === "1") return;
-    const t = setTimeout(() => setShow(true), 1200); // let first paint / login settle
-    return () => clearTimeout(t);
+
+    let timer: ReturnType<typeof setTimeout>;
+    // The dashboard raises this while a first-run tour is pending or on screen so
+    // the two never overlap; it's unset on pages without a dashboard.
+    const suppressed = () => (window as Window & { __gvSuppressInstall?: boolean }).__gvSuppressInstall === true;
+    // Wait for first paint / login to settle, then reveal — but not while a tour
+    // is in play; the re-check inside the timer covers a tour starting mid-delay.
+    const schedule = () => {
+      clearTimeout(timer);
+      if (suppressed()) return;
+      timer = setTimeout(() => { if (!suppressed()) setShow(true); }, 1200);
+    };
+    // Tour starts → cancel any pending reveal and pull the hint if it's up.
+    // Tour ends → (re)schedule the reveal.
+    const onSuppress = (e: Event) => {
+      if ((e as CustomEvent<boolean>).detail) { clearTimeout(timer); setShow(false); }
+      else schedule();
+    };
+    window.addEventListener("gv:install-suppress", onSuppress);
+    schedule();
+    return () => { clearTimeout(timer); window.removeEventListener("gv:install-suppress", onSuppress); };
   }, []);
 
   if (!show) return null;

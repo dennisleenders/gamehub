@@ -18,6 +18,7 @@ import { useUpcoming } from "@/lib/useUpcoming";
 import { useAchievementToasts } from "@/components/useAchievementToasts";
 import { Avatar, AvatarPickerModal } from "@/components/Avatar";
 import Splash from "@/components/Splash";
+import TutorialOverlay, { type TutorialStep } from "@/components/TutorialOverlay";
 import { avatarSrc } from "@/lib/avatars";
 import {
   type Game, type Profile, type PlayStatus, type UpcomingGame, type Household, type HouseholdRole,
@@ -68,6 +69,18 @@ const COLLECTION_LAYOUTS = [
 ] as const;
 type CollectionLayout = (typeof COLLECTION_LAYOUTS)[number]["key"];
 
+// First-run dashboard tour. Each step spotlights a real element (tagged with a
+// matching `data-tut` attribute). Bump the version key below if these change and
+// you want returning users to see the tour again.
+const TUTORIAL_VERSION = 1;
+const TUTORIAL_STEPS: TutorialStep[] = [
+  { selector: '[data-tut="account"]', title: "Make it yours", body: "Your profile lives here — pick an avatar and colour, or sign out." },
+  { selector: '[data-tut="settings"]', title: "Settings", body: "Rename your vault, manage who's in it, and tune what shows on your dashboard." },
+  { selector: '[data-tut="scan"]', title: "Scan the box", body: "Got the physical copy in hand? Scan its barcode and we'll look up the game and its value for you." },
+  { selector: '[data-tut="add"]', title: "Add a game", body: "Tap + to add a game — search by title for instant cover art and details, or fill it in yourself." },
+  { selector: '[data-tut="nav"]', title: "Find your way", body: "Move between your dashboard, full collection, upcoming releases and the achievements you're chasing." },
+];
+
 export default function VaultApp({ currentUser, household, role }: { currentUser: Profile; household: Household; role: HouseholdRole }) {
   const uid = currentUser.id;
   const { games, profiles, members, challenges, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences, saveProfile, renameVault, regenerateInvite, removeMember, leaveVault } = useVault(uid, household.id);
@@ -89,6 +102,26 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
   const [scanOpen, setScanOpen] = useState(false);
   const [creatingChallenge, setCreatingChallenge] = useState(false);
   const [avatarOpen, setAvatarOpen] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  // True from the moment we know a first-run tour will appear until it's
+  // dismissed — including the splash + pre-show gap before the overlay mounts.
+  const [tourPending, setTourPending] = useState(false);
+  const tutorialKey = `gv-tutorial-v${TUTORIAL_VERSION}-${uid}`;
+  const dismissTutorial = useCallback(() => {
+    try { localStorage.setItem(tutorialKey, "1"); } catch { /* private mode: just close */ }
+    setShowTutorial(false);
+    setTourPending(false);
+  }, [tutorialKey]);
+  // The tour is on screen only on the dashboard with no modal stacked over it.
+  const tutorialActive = showTutorial && view === "home" && !detail && !editing && !settingsOpen && !scanOpen && !avatarOpen;
+  // Tell the global iOS install hint to stay hidden while a tour is pending or on
+  // screen (it lives in the root layout, out of this tree's reach). Pages without
+  // a dashboard never set this, so the hint behaves normally there.
+  const suppressInstallHint = tutorialActive || tourPending;
+  useEffect(() => {
+    (window as Window & { __gvSuppressInstall?: boolean }).__gvSuppressInstall = suppressInstallHint;
+    window.dispatchEvent(new CustomEvent("gv:install-suppress", { detail: suppressInstallHint }));
+  }, [suppressInstallHint]);
 
   // Switching views (via the bottom nav or a dashboard shortcut) should always
   // land you at the top of the new page rather than keeping the old scroll.
@@ -109,6 +142,18 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
     const t = setTimeout(() => setMinSplash(false), 2000);
     return () => clearTimeout(t);
   }, []);
+
+  // First-run tour: show it once per user (per browser) the first time they land
+  // on a ready dashboard. The short delay lets the dashboard paint so the
+  // spotlight's targets are laid out before it measures them.
+  useEffect(() => {
+    if (loading || minSplash) return;
+    if (typeof window === "undefined") return;
+    if (localStorage.getItem(tutorialKey)) { setTourPending(false); return; }
+    setTourPending(true); // first-run: claim priority over the install hint now
+    const t = setTimeout(() => setShowTutorial(true), 700);
+    return () => clearTimeout(t);
+  }, [loading, minSplash, tutorialKey]);
 
   // Pop a toast whenever you cross an achievement tier. Gated on !loading so the
   // baseline is taken from fully-loaded data (no notification spam on first load).
@@ -139,20 +184,33 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
   const navTrackRef = useRef<HTMLDivElement>(null);
   const navBtnRef = useRef<Record<string, HTMLButtonElement | null>>({});
   const [orb, setOrb] = useState({ left: 0, top: 0, width: 0, height: 0 });
+  // Transitions stay off until the orb's initial position has painted, so it
+  // doesn't slide/scale in from the corner on first load — only later tab
+  // changes animate. The ref guards against re-arming on every measure.
+  const [orbReady, setOrbReady] = useState(false);
+  const orbReadyRef = useRef(false);
   const measureOrb = useCallback((v: string) => {
     const btn = navBtnRef.current[v];
     if (!btn) return;
     setOrb({ left: btn.offsetLeft, top: btn.offsetTop, width: btn.offsetWidth, height: btn.offsetHeight });
+    if (!orbReadyRef.current) {
+      orbReadyRef.current = true;
+      // Two frames: let the snapped position commit before transitions turn on.
+      requestAnimationFrame(() => requestAnimationFrame(() => setOrbReady(true)));
+    }
   }, []);
   // Snap before paint on tab change (no first-frame slide from 0,0); re-measure
   // when the layout shifts (resize crosses the label breakpoint, fonts settle).
-  useLayoutEffect(() => { measureOrb(view); }, [view, measureOrb]);
+  // `loading`/`minSplash` are deps so we re-measure the moment the splash clears
+  // and the nav finally mounts — otherwise the orb stays unmeasured (invisible)
+  // on first load, since `view` never changed to retrigger this.
+  useLayoutEffect(() => { measureOrb(view); }, [view, measureOrb, loading, minSplash]);
   useEffect(() => {
     const onResize = () => measureOrb(view);
     window.addEventListener("resize", onResize);
     document.fonts?.ready.then(onResize).catch(() => {});
     return () => window.removeEventListener("resize", onResize);
-  }, [view, measureOrb]);
+  }, [view, measureOrb, loading, minSplash]);
 
   const owned = games.filter((g) => g.status === "owned");
   const wishlist = games.filter((g) => g.status === "wishlist");
@@ -285,7 +343,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
                   <div style={{ fontFamily: "var(--display)", fontSize: 64, lineHeight: .9 }}>{owned.length}</div>
                   <div style={{ fontSize: 15, color: "var(--ink-dim)", paddingBottom: 6 }}>games owned</div>
                 </div>
-                <div style={{ display: "flex", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
+                <div data-tut="stats" style={{ display: "flex", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
                   <MiniStat icon={Library} label="BACKLOG" value={myBacklog} color="var(--accent3)"
                     onClick={() => { setQ(""); setStatus("owned"); setPlatform("all"); setPlayerFilter(uid); setPlayFilter("backlog"); setView("collection"); }} />
                   <MiniStat icon={Check} label="FINISHED" value={myFinished} color="var(--good)"
@@ -482,10 +540,10 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
 
       <nav style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 30, display: "flex", justifyContent: "center",
         padding: "10px 16px calc(10px + env(safe-area-inset-bottom))", background: "linear-gradient(to top, var(--bg) 60%, transparent)", pointerEvents: "none" }}>
-        <div ref={navTrackRef} style={{ position: "relative", display: "flex", gap: 6, background: "var(--panel)", padding: 5, borderRadius: 99, border: "1px solid var(--line)", boxShadow: "0 8px 28px -8px #000", pointerEvents: "auto" }}>
+        <div data-tut="nav" ref={navTrackRef} style={{ position: "relative", display: "flex", gap: 6, background: "var(--panel)", padding: 5, borderRadius: 99, border: "1px solid var(--line)", boxShadow: "0 8px 28px -8px #000", pointerEvents: "auto" }}>
           <div aria-hidden style={{ position: "absolute", left: orb.left, top: orb.top, width: orb.width, height: orb.height,
-            borderRadius: 99, background: "var(--accent)", zIndex: 0, opacity: orb.width ? 1 : 0,
-            transition: "left .34s cubic-bezier(.2,.85,.25,1), top .34s cubic-bezier(.2,.85,.25,1), width .34s cubic-bezier(.2,.85,.25,1), height .34s cubic-bezier(.2,.85,.25,1)" }} />
+            borderRadius: 99, background: me.color, zIndex: 0, opacity: orb.width ? 1 : 0,
+            transition: orbReady ? "left .34s cubic-bezier(.2,.85,.25,1), top .34s cubic-bezier(.2,.85,.25,1), width .34s cubic-bezier(.2,.85,.25,1), height .34s cubic-bezier(.2,.85,.25,1)" : "none" }} />
           {([["home", "DASHBOARD", CircleUser], ["collection", "COLLECTION", LayoutGrid], ["upcoming", "UPCOMING", CalendarClock], ["achievements", "ACHIEVEMENTS", Trophy]] as const).map(([k, lbl, Ic]) => (
             <button key={k} ref={(el) => { navBtnRef.current[k] = el; }} onClick={() => setView(k)} aria-label={lbl} className="nav-pill"
               style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: "none", cursor: "pointer",
@@ -525,6 +583,9 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
       )}
       {avatarOpen && (
         <AvatarPickerModal currentUser={me} others={profiles.filter((p) => p.id !== uid)} onClose={() => setAvatarOpen(false)} onSave={saveProfile} />
+      )}
+      {tutorialActive && (
+        <TutorialOverlay steps={TUTORIAL_STEPS} onClose={dismissTutorial} />
       )}
       {scanOpen && (
         <ScannerModal resolve={resolveUpc} onClose={() => setScanOpen(false)}
@@ -659,10 +720,10 @@ function TopBar({ floating, currentUser, userMenu, setUserMenu, onScan, onSettin
     <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: floating ? "calc(16px + env(safe-area-inset-top)) 16px 14px" : "calc(16px + env(safe-area-inset-top)) 0 16px", position: "relative" }}>
       <button onClick={onHome} aria-label="Go to dashboard" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "var(--display)", fontSize: 19, letterSpacing: 1.5, fontWeight: 700, color: floating ? "#fff" : "var(--ink)", textShadow: floating ? "0 2px 12px rgba(0,0,0,0.5)" : "none" }}>GAMEVAULT</button>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <button onClick={onScan} aria-label="Scan" style={iconBtn}><ScanLine size={18} /></button>
-        <button onClick={onSettings} aria-label="Settings" style={iconBtn}><Settings size={18} /></button>
-        <button onClick={onAdd} aria-label="Add" style={{ display: "grid", placeItems: "center", width: 38, height: 38, borderRadius: 99, border: "none", cursor: "pointer", background: "var(--accent2)", color: "var(--bg)" }}><Plus size={19} strokeWidth={3} /></button>
-        <div style={{ position: "relative" }}>
+        <button data-tut="scan" onClick={onScan} aria-label="Scan" style={iconBtn}><ScanLine size={18} /></button>
+        <button data-tut="settings" onClick={onSettings} aria-label="Settings" style={iconBtn}><Settings size={18} /></button>
+        <button data-tut="add" onClick={onAdd} aria-label="Add" style={{ display: "grid", placeItems: "center", width: 38, height: 38, borderRadius: 99, border: "none", cursor: "pointer", background: "var(--accent2)", color: "var(--bg)" }}><Plus size={19} strokeWidth={3} /></button>
+        <div style={{ position: "relative" }} data-tut="account">
           <button onClick={() => setUserMenu((o: boolean) => !o)} aria-label="Account"
             style={myAvatar
               ? { display: "grid", placeItems: "center", width: 38, height: 38, borderRadius: 99, cursor: "pointer", border: "none", background: "none", padding: 0 }
