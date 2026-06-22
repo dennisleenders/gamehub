@@ -5,7 +5,7 @@ import {
   Search, Plus, X, Gamepad2, Trophy, Heart, Disc, LayoutGrid, Sparkles, Check, Box, CircleUser,
   ChevronLeft, ChevronRight, ChevronDown, Pencil, Loader2, ImageIcon, Library, Joystick,
   ScanLine, Settings, LogOut, Clock, Tag, Star, CalendarClock, Play, Minus,
-  Home, Ticket, Copy, RefreshCw, Crown, UserMinus, Trash2, Users, Grid2x2, List,
+  Home, Ticket, Copy, RefreshCw, Crown, UserMinus, Trash2, Users, Grid2x2, List, SlidersHorizontal, Radio,
 } from "lucide-react";
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
@@ -13,15 +13,16 @@ import { useVault } from "@/lib/useVault";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 import { useLazyList } from "@/lib/useLazyList";
 import AchievementsView, { CreateChallengeModal, RankingBoard } from "@/components/AchievementsView";
-import UpcomingView, { UpcomingRail, UpcomingCover } from "@/components/UpcomingView";
+import UpcomingView, { UpcomingRail, UpcomingCover, EventsRail, EventDetail } from "@/components/UpcomingView";
 import { useUpcoming } from "@/lib/useUpcoming";
+import { useEvents } from "@/lib/useEvents";
 import { useAchievementToasts } from "@/components/useAchievementToasts";
 import { Avatar, AvatarPickerModal } from "@/components/Avatar";
 import Splash from "@/components/Splash";
 import TutorialOverlay, { type TutorialStep } from "@/components/TutorialOverlay";
 import { avatarSrc } from "@/lib/avatars";
 import {
-  type Game, type Profile, type PlayStatus, type UpcomingGame, type Household, type HouseholdRole,
+  type Game, type Profile, type PlayStatus, type UpcomingGame, type GameEvent, type Household, type HouseholdRole,
   type MemberWithProfile, PLAY_STATUS, PLATFORM_TINT,
   CONDITIONS, PLATFORMS, OVERVIEW_SECTIONS, money, fmtDate, igdbPlatformsToApp,
 } from "@/lib/types";
@@ -96,6 +97,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
   // The upcoming release whose detail modal is open (separate from `detail`, which
   // is for collection games — upcoming games aren't in our DB).
   const [upcomingDetail, setUpcomingDetail] = useState<UpcomingGame | null>(null);
+  const [eventDetail, setEventDetail] = useState<GameEvent | null>(null);
   const [editing, setEditing] = useState<GameSeed | null>(null);
   const [userMenu, setUserMenu] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -163,6 +165,13 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
   // shown or the Upcoming view is opened, so we don't hit IGDB needlessly.
   const upcomingEnabled = showSection("upcoming") || view === "upcoming";
   const { games: upcoming, loading: upcomingLoading, error: upcomingError } = useUpcoming(upcomingEnabled);
+  // Industry events (IGDB) — needed by the Upcoming view's Events section and the
+  // optional dashboard rail; fetched lazily once either is shown.
+  const eventsEnabled = showSection("events") || view === "upcoming";
+  const { events, loading: eventsLoading, error: eventsError } = useEvents(eventsEnabled);
+  // Which Upcoming sub-section the view opens on. The dashboard's events rail
+  // sets this to "events" before navigating so SEE ALL lands on the right tab.
+  const [upcomingMode, setUpcomingMode] = useState<"games" | "events">("games");
 
   const resolveUpc = async (upc: string): Promise<{ title: string | null; error?: string; resetAt?: number; price?: PricePayload | null; pricecharting_id?: string | null }> => {
     const r = await fetch("/api/upc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ upc }) });
@@ -177,6 +186,9 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
   const [platform, setPlatform] = useState("all");
   const [sort, setSort] = useState("recent");
   const [layout, setLayout] = useState<CollectionLayout>("comfortable");
+  // The filter block is collapsed by default behind a "Filters" button to keep
+  // the collection header compact; it slides open on demand.
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   // Bottom-nav "orb": one accent pill that slides to the active tab instead of a
   // per-button background. Positions are measured (labels make the buttons
@@ -400,12 +412,26 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
                     <CalendarClock size={15} color="var(--accent3)" />
                     <span style={{ fontSize: 12, letterSpacing: 1.5, fontFamily: "var(--display)", fontWeight: 700 }}>UPCOMING GAMES</span>
-                    <button onClick={() => setView("upcoming")}
+                    <button onClick={() => { setUpcomingMode("games"); setView("upcoming"); }}
                       style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", color: "var(--accent2)", fontFamily: "var(--display)", fontSize: 11, fontWeight: 700 }}>
                       SEE ALL
                     </button>
                   </div>
                   <UpcomingRail games={upcoming} loading={upcomingLoading} error={upcomingError} wishlistIds={wishlistIgdbIds} onOpen={setUpcomingDetail} />
+                </section>
+              )}
+
+              {showSection("events") && (
+                <section>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                    <Radio size={15} color="var(--accent3)" />
+                    <span style={{ fontSize: 12, letterSpacing: 1.5, fontFamily: "var(--display)", fontWeight: 700 }}>GAME EVENTS</span>
+                    <button onClick={() => { setUpcomingMode("events"); setView("upcoming"); }}
+                      style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", color: "var(--accent2)", fontFamily: "var(--display)", fontSize: 11, fontWeight: 700 }}>
+                      SEE ALL
+                    </button>
+                  </div>
+                  <EventsRail events={events} loading={eventsLoading} error={eventsError} onOpen={() => { setUpcomingMode("events"); setView("upcoming"); }} />
                 </section>
               )}
 
@@ -467,11 +493,23 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
                 style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "var(--ink)", fontSize: 15, fontFamily: "var(--body)" }} />
               {q && <button onClick={() => setQ("")} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)" }}><X size={16} /></button>}
             </div>
-            <div className="filter-grid">
-              <FilterField label="Library" value={status} onChange={(v) => { setStatus(v); if (v === "wishlist") { setPlayerFilter("all"); setPlayFilter("all"); } }} options={[["all", "All games"], ["owned", "Owned"], ["wishlist", "Wishlist"]]} />
-              <FilterField label="Player" value={playerFilter} onChange={setPlayerFilter} disabled={status === "wishlist"} options={[["all", "All players"], ...profiles.map((a) => [a.id, a.name] as [string, string])]} />
-              <FilterField label="Status" value={playFilter} onChange={setPlayFilter} disabled={status === "wishlist"} options={[["all", "Any status"], ["playing", "Playing"], ["finished", "Finished"], ["backlog", "Backlog"], ["abandoned", "Abandoned"], ["collection", "In Collection"]]} />
-              <FilterField label="System" value={platform} onChange={setPlatform} options={[["all", "All systems"], ...PLATFORMS.map((p) => [p, p] as [string, string])]} />
+            {(() => { const activeFilters = [status, playerFilter, playFilter, platform].filter((v) => v !== "all").length; return (
+            <button onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen}
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, width: "100%", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: "11px 14px", cursor: "pointer", color: "var(--ink)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 13 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <SlidersHorizontal size={16} color="var(--ink-dim)" /> Filters
+                {activeFilters > 0 && <span style={{ display: "grid", placeItems: "center", minWidth: 18, height: 18, padding: "0 5px", borderRadius: 99, background: "var(--accent2)", color: "var(--bg)", fontSize: 10, fontWeight: 800 }}>{activeFilters}</span>}
+              </span>
+              <ChevronDown size={16} color="var(--ink-dim)" style={{ transition: "transform .3s ease", transform: filtersOpen ? "rotate(180deg)" : "none" }} />
+            </button>
+            ); })()}
+            <div className={`filter-collapse${filtersOpen ? " open" : ""}`}>
+              <div className="filter-grid">
+                <FilterField label="Library" value={status} onChange={(v) => { setStatus(v); if (v === "wishlist") { setPlayerFilter("all"); setPlayFilter("all"); } }} options={[["all", "All games"], ["owned", "Owned"], ["wishlist", "Wishlist"]]} />
+                <FilterField label="Player" value={playerFilter} onChange={setPlayerFilter} disabled={status === "wishlist"} options={[["all", "All players"], ...profiles.map((a) => [a.id, a.name] as [string, string])]} />
+                <FilterField label="Status" value={playFilter} onChange={setPlayFilter} disabled={status === "wishlist"} options={[["all", "Any status"], ["playing", "Playing"], ["finished", "Finished"], ["backlog", "Backlog"], ["abandoned", "Abandoned"], ["collection", "In Collection"]]} />
+                <FilterField label="System" value={platform} onChange={setPlatform} options={[["all", "All systems"], ...PLATFORMS.map((p) => [p, p] as [string, string])]} />
+              </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "14px 2px 16px", gap: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
@@ -534,7 +572,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
             <div style={{ height: 1, background: "linear-gradient(to right, transparent, var(--line) 12%, var(--line) 88%, transparent)", margin: "0 0 18px" }} />
             <h1 style={{ fontFamily: "var(--display)", fontSize: 28, fontWeight: 800, letterSpacing: -0.5, margin: "2px 2px 16px" }}>Upcoming</h1>
           </div>
-          <UpcomingView games={upcoming} loading={upcomingLoading} error={upcomingError} wishlistIds={wishlistIgdbIds} ownedIds={ownedIgdbIds} onWishlist={wishlistUpcoming} onUnwishlist={unwishlistUpcoming} onOpen={setUpcomingDetail} />
+          <UpcomingView games={upcoming} loading={upcomingLoading} error={upcomingError} events={events} eventsLoading={eventsLoading} eventsError={eventsError} initialMode={upcomingMode} wishlistIds={wishlistIgdbIds} ownedIds={ownedIgdbIds} onWishlist={wishlistUpcoming} onUnwishlist={unwishlistUpcoming} onOpen={setUpcomingDetail} onOpenEvent={setEventDetail} />
         </div>
       )}
 
@@ -545,7 +583,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
             borderRadius: 99, background: me.color, zIndex: 0, opacity: orb.width ? 1 : 0,
             transition: orbReady ? "left .34s cubic-bezier(.2,.85,.25,1), top .34s cubic-bezier(.2,.85,.25,1), width .34s cubic-bezier(.2,.85,.25,1), height .34s cubic-bezier(.2,.85,.25,1)" : "none" }} />
           {([["home", "DASHBOARD", CircleUser], ["collection", "COLLECTION", LayoutGrid], ["upcoming", "UPCOMING", CalendarClock], ["achievements", "ACHIEVEMENTS", Trophy]] as const).map(([k, lbl, Ic]) => (
-            <button key={k} ref={(el) => { navBtnRef.current[k] = el; }} onClick={() => setView(k)} aria-label={lbl} className="nav-pill"
+            <button key={k} ref={(el) => { navBtnRef.current[k] = el; }} onClick={() => { if (k === "upcoming") setUpcomingMode("games"); setView(k); }} aria-label={lbl} className="nav-pill"
               style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: "none", cursor: "pointer",
                 borderRadius: 99, fontFamily: "var(--display)", fontWeight: 700, fontSize: 12, letterSpacing: 1, background: "transparent",
                 color: view === k ? "var(--bg)" : "var(--ink-dim)", transition: "color .2s ease" }}>
@@ -557,6 +595,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
 
       {liveDetail && <DetailView game={liveDetail} userById={userById} currentUser={me}
         onProgress={(status, hours) => saveGame({ id: liveDetail.id, status: "owned", myStatus: status, myHours: hours })}
+        onSetValue={(cents) => saveGame({ id: liveDetail.id, value_cents: cents })}
         onClose={() => setDetail(null)} onEdit={() => setEditing(liveDetail)} />}
       {upcomingDetail && (
         <UpcomingDetail
@@ -564,6 +603,15 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
           existingStatus={upcomingExisting?.status ?? null}
           onClose={() => setUpcomingDetail(null)}
           onAdd={(payload) => saveGame(payload)} />
+      )}
+      {eventDetail && (
+        <EventDetail
+          event={eventDetail}
+          wishlistIds={wishlistIgdbIds}
+          ownedIds={ownedIgdbIds}
+          onWishlist={wishlistUpcoming}
+          onUnwishlist={unwishlistUpcoming}
+          onClose={() => setEventDetail(null)} />
       )}
       {editing !== null && (
         <GameModal game={editing} currentUser={currentUser} genres={genres} priceEnabled={priceChartingEnabled}
@@ -809,8 +857,8 @@ function HeroSlide({ g, hours, player, currentUser, onOpen }: { g: Game; hours: 
       <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
         {showArt ? <img src={g.cover!} alt="" aria-hidden style={{ width: "100%", height: "100%", objectFit: "cover", transform: "scale(1.25)", filter: "blur(10px) saturate(1.2) brightness(.6)" }} /> : <div style={{ position: "absolute", inset: 0, background: `linear-gradient(160deg, ${tint}55, var(--bg))` }} />}
       </div>
-      <div onClick={() => onOpen(g)} role="button" aria-label={`Open ${g.title}`} style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: "5% 24px 52%", cursor: "pointer" }}>
-        {showArt ? <img src={g.cover!} alt={g.title} onError={() => setErr(true)} style={{ width: "auto", height: "auto", maxWidth: "min(74%, 340px)", maxHeight: "100%", objectFit: "contain", borderRadius: 16, border: "1px solid rgba(255,255,255,0.18)", boxShadow: "0 24px 64px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.4)" }} /> : <span style={{ fontFamily: "var(--display)", fontSize: 96, color: tint, opacity: .5 }}>{(g.title || "?")[0]}</span>}
+      <div onClick={() => onOpen(g)} role="button" aria-label={`Open ${g.title}`} style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: "12% 24px 52%", cursor: "pointer" }}>
+        {showArt ? <img src={g.cover!} alt={g.title} onError={() => setErr(true)} style={{ width: "auto", height: "auto", maxWidth: "min(64%, 340px)", maxHeight: "100%", objectFit: "contain", borderRadius: 16, border: "1px solid rgba(255,255,255,0.18)", boxShadow: "0 24px 64px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.4)" }} /> : <span style={{ fontFamily: "var(--display)", fontSize: 96, color: tint, opacity: .5 }}>{(g.title || "?")[0]}</span>}
       </div>
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "linear-gradient(to top, #13111a 0%, rgba(19,17,26,0.82) 34%, rgba(19,17,26,0.12) 64%, rgba(19,17,26,0.28) 100%)" }} />
       <button onClick={() => onOpen(g)} style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "0 20px 54px", textAlign: "left", background: "none", border: "none", cursor: "pointer", color: "#fff", width: "100%" }}>
@@ -838,6 +886,15 @@ function HeroSlide({ g, hours, player, currentUser, onOpen }: { g: Game; hours: 
   );
 }
 
+// Prev/next arrows overlaid on the screenshot lightbox; faded out at the ends.
+const shotNavBtn = (side: "left" | "right", disabled: boolean): React.CSSProperties => ({
+  position: "absolute", top: "50%", [side]: 10, transform: "translateY(-50%)",
+  display: "grid", placeItems: "center", width: 40, height: 40, borderRadius: 99,
+  background: "#000000a6", border: "1px solid rgba(255,255,255,0.15)", color: "#fff",
+  cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.25 : 1, padding: 0,
+  backdropFilter: "blur(4px)", transition: "opacity .2s ease",
+});
+
 // IGDB screenshots (t_screenshot_big, 16:9) shown in the detail view as a swipeable
 // slider. Each image drops out on its own load error so a stale URL never leaves a
 // broken tile. Mirrors the hero slider: scroll-snap track, dots, mouse-drag.
@@ -849,8 +906,10 @@ function Screenshots({ shots }: { shots?: string[] | null }) {
   // fewer than the image count — measured from the actual layout below.
   const [pages, setPages] = useState(1);
   const [broken, setBroken] = useState<Record<number, boolean>>({});
-  // The screenshot opened full-size in the lightbox, or null when closed.
-  const [zoom, setZoom] = useState<string | null>(null);
+  // Position within `list` of the screenshot opened full-size in the lightbox, or
+  // null when closed. Tracking the index (not just the URL) lets us page to the
+  // previous/next live screenshot from inside the lightbox.
+  const [zoomIdx, setZoomIdx] = useState<number | null>(null);
   const drag = useRef({ active: false, startX: 0, startScroll: 0, moved: false });
 
   const all = (shots ?? []).filter((s) => typeof s === "string" && s.trim());
@@ -871,8 +930,10 @@ function Screenshots({ shots }: { shots?: string[] | null }) {
   const onPointerMove = (e: React.PointerEvent) => { if (!drag.current.active) return; const el = trackRef.current; if (!el) return; if (Math.abs(e.clientX - drag.current.startX) > 4) drag.current.moved = true; el.scrollLeft = drag.current.startScroll - (e.clientX - drag.current.startX); };
   const endDrag = () => { if (!drag.current.active) return; const el = trackRef.current; drag.current.active = false; if (el) goTo(clamp(el)); };
   // A mouse-drag to scroll also fires a click; only open the lightbox on a clean
-  // tap/click. IGDB serves bigger renders by swapping the size token in the URL.
-  const open = (src: string) => { if (!drag.current.moved) setZoom(src.replace("t_screenshot_big", "t_1080p")); };
+  // tap/click. We store the list position; the big URL is derived on render.
+  const open = (pos: number) => { if (!drag.current.moved) setZoomIdx(pos); };
+  // Step to the previous/next live screenshot, clamped at the ends.
+  const navZoom = (d: number) => setZoomIdx((z) => z == null ? z : Math.max(0, Math.min(list.length - 1, z + d)));
 
   useEffect(() => {
     recompute();
@@ -884,14 +945,27 @@ function Screenshots({ shots }: { shots?: string[] | null }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list.length]);
 
+  // Arrow keys page through the lightbox; Escape closes it.
+  useEffect(() => {
+    if (zoomIdx === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setZoomIdx(null);
+      else if (e.key === "ArrowRight") navZoom(1);
+      else if (e.key === "ArrowLeft") navZoom(-1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoomIdx, list.length]);
+
   if (!list.length) return null;
   return (
     <div style={{ marginTop: 20 }}>
       <div style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", marginBottom: 8 }}>SCREENSHOTS</div>
       <div ref={trackRef} onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag}
         className="shot-track" style={{ cursor: pages > 1 ? "grab" : "default" }}>
-        {list.map(({ src, i }) => (
-          <div key={i} className="shot-slide" onClick={() => open(src)} style={{ cursor: "zoom-in" }}>
+        {list.map(({ src, i }, pos) => (
+          <div key={i} className="shot-slide" onClick={() => open(pos)} style={{ cursor: "zoom-in" }}>
             <img src={src} alt="" loading="lazy" onLoad={recompute} onError={() => setBroken((b) => ({ ...b, [i]: true }))}
               style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", display: "block", borderRadius: "var(--radius)", border: "1px solid var(--line)" }} />
           </div>
@@ -902,14 +976,22 @@ function Screenshots({ shots }: { shots?: string[] | null }) {
           {Array.from({ length: pages }, (_, i) => { const on = i === idx; return <button key={i} onClick={() => goTo(i)} aria-label={`Screenshot ${i + 1}`} style={{ width: on ? 22 : 8, height: 8, borderRadius: 99, border: "none", cursor: "pointer", padding: 0, background: on ? "var(--accent)" : "var(--line)", transition: "all .3s" }} />; })}
         </div>
       )}
-      {zoom && (
-        <div onClick={() => setZoom(null)} className="fade" style={{ position: "fixed", inset: 0, zIndex: 90, background: "#000c", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      {zoomIdx !== null && list[zoomIdx] && (
+        <div onClick={() => setZoomIdx(null)} className="fade" style={{ position: "fixed", inset: 0, zIndex: 90, background: "#000c", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 640, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 20, padding: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, padding: "2px 4px" }}>
-              <div style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>SCREENSHOT</div>
-              <button onClick={() => setZoom(null)} aria-label="Close" style={{ display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><X size={16} /></button>
+              <div style={{ fontSize: 9.5, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>SCREENSHOT{list.length > 1 ? ` ${zoomIdx + 1} / ${list.length}` : ""}</div>
+              <button onClick={() => setZoomIdx(null)} aria-label="Close" style={{ display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><X size={16} /></button>
             </div>
-            <img src={zoom} alt="" style={{ width: "100%", maxHeight: "78vh", objectFit: "contain", display: "block", borderRadius: "var(--radius)" }} />
+            <div style={{ position: "relative" }}>
+              <img src={list[zoomIdx].src.replace("t_screenshot_big", "t_1080p")} alt="" style={{ width: "100%", maxHeight: "78vh", objectFit: "contain", display: "block", borderRadius: "var(--radius)" }} />
+              {list.length > 1 && (
+                <>
+                  <button onClick={() => navZoom(-1)} disabled={zoomIdx === 0} aria-label="Previous screenshot" style={shotNavBtn("left", zoomIdx === 0)}><ChevronLeft size={22} /></button>
+                  <button onClick={() => navZoom(1)} disabled={zoomIdx === list.length - 1} aria-label="Next screenshot" style={shotNavBtn("right", zoomIdx === list.length - 1)}><ChevronRight size={22} /></button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -985,11 +1067,21 @@ function ProgressActions({ g, currentUser, onProgress }: { g: Game; currentUser:
   );
 }
 
-function DetailView({ game, userById, currentUser, onProgress, onClose, onEdit }: { game: Game; userById: (id?: string | null) => Profile | null; currentUser: Profile; onProgress: (status: PlayStatus, hours: number) => Promise<void>; onClose: () => void; onEdit: () => void }) {
+function DetailView({ game, userById, currentUser, onProgress, onClose, onEdit, onSetValue }: { game: Game; userById: (id?: string | null) => Profile | null; currentUser: Profile; onProgress: (status: PlayStatus, hours: number) => Promise<void>; onClose: () => void; onEdit: () => void; onSetValue: (cents: number) => Promise<void> }) {
   useBodyScrollLock();
   const g = game;
   const tint = tintFor(g.platform);
   const addedByUser = userById(g.added_by);
+  // Inline quick-edit for the market value. `valDraft` holds the euro string
+  // while editing (null = not editing); the displayed/stored value is in cents.
+  const [valDraft, setValDraft] = useState<string | null>(null);
+  const [savingVal, setSavingVal] = useState(false);
+  const saveVal = async () => {
+    if (savingVal || valDraft === null) return;
+    setSavingVal(true);
+    try { await onSetValue(Math.max(0, Math.round((Number(valDraft) || 0) * 100))); setValDraft(null); }
+    finally { setSavingVal(false); }
+  };
   const facts: [string, any][] = [["Developer", g.developer || "—"], ["Publisher", g.publisher || "—"], ["Released", g.year || "—"], ["Genre", g.genre || "—"], ["Condition", conditionLabel(g.condition) || "—"], ["Region", g.region || "—"]];
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", zIndex: 60, display: "flex", alignItems: "flex-end", justifyContent: "center" }} className="sheet-backdrop">
@@ -1092,8 +1184,39 @@ function DetailView({ game, userById, currentUser, onProgress, onClose, onEdit }
 
           <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
             <div style={{ flex: 1, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: "11px 13px" }}>
-              <div style={{ fontSize: 9, letterSpacing: 1.2, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>MARKET VALUE</div>
-              <div style={{ fontSize: 16, fontWeight: 800, marginTop: 5, fontFamily: "var(--display)" }}>{money(g.value_cents)}</div>
+              {valDraft === null ? (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 9, letterSpacing: 1.2, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>MARKET VALUE</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, marginTop: 5, fontFamily: "var(--display)" }}>{money(g.value_cents)}</div>
+                  </div>
+                  <button onClick={() => setValDraft(g.value_cents ? String(Math.round(g.value_cents / 100)) : "")} aria-label="Edit market value"
+                    style={{ display: "grid", placeItems: "center", width: 24, height: 24, flexShrink: 0, borderRadius: 7, background: "var(--panel)", border: "1px solid var(--line)", cursor: "pointer", color: "var(--ink-dim)" }}>
+                    <Pencil size={12} />
+                  </button>
+                </div>
+              ) : (
+                <>
+                <div style={{ fontSize: 9, letterSpacing: 1.2, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>MARKET VALUE</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 7 }}>
+                  <div style={{ display: "flex", alignItems: "center", flex: 1, minWidth: 0, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: "0 10px" }}>
+                    <span style={{ fontSize: 15, fontWeight: 800, fontFamily: "var(--display)", color: "var(--ink-dim)" }}>€</span>
+                    <input autoFocus type="number" min={0} inputMode="numeric" value={valDraft}
+                      onChange={(e) => setValDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") saveVal(); if (e.key === "Escape") setValDraft(null); }}
+                      style={{ flex: 1, minWidth: 0, background: "none", border: "none", outline: "none", color: "var(--ink)", fontSize: 15, fontWeight: 800, fontFamily: "var(--display)", padding: "9px 6px" }} />
+                  </div>
+                  <button onClick={saveVal} disabled={savingVal} aria-label="Save value"
+                    style={{ display: "grid", placeItems: "center", width: 34, height: 34, flexShrink: 0, borderRadius: "var(--radius)", background: "var(--good)", border: "none", cursor: savingVal ? "default" : "pointer", color: "var(--bg)", opacity: savingVal ? 0.6 : 1 }}>
+                    {savingVal ? <Loader2 size={15} className="spin" /> : <Check size={16} strokeWidth={3} />}
+                  </button>
+                  <button onClick={() => setValDraft(null)} disabled={savingVal} aria-label="Cancel"
+                    style={{ display: "grid", placeItems: "center", width: 34, height: 34, flexShrink: 0, borderRadius: "var(--radius)", background: "var(--panel)", border: "1px solid var(--line)", cursor: "pointer", color: "var(--ink-dim)" }}>
+                    <X size={16} strokeWidth={3} />
+                  </button>
+                </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -1118,7 +1241,8 @@ function upcomingWishlistPayload(g: UpcomingGame, meta: UpcomingMeta): Partial<G
     status: "wishlist",
     cover: g.cover || null,
     genre: g.genre || null,
-    year: new Date(g.releaseDate * 1000).getFullYear(),
+    // Event-announced games can lack a date (releaseDate 0) — leave year null then.
+    year: g.releaseDate ? new Date(g.releaseDate * 1000).getFullYear() : null,
     igdb_id: g.igdbId,
     developer: meta?.developer || null,
     publisher: meta?.publisher || null,
@@ -1275,7 +1399,7 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
     title: game.title || "", platform: game.platform || PLATFORMS[0] || "PS1", status: game.status || "owned",
     condition: seedCondition, region: game.region || "PAL", genre: game.genre || genres[0] || "RPG",
     value_eur: seedValueEur,
-    cover: game.cover || "", year: game.year || "",
+    cover: game.cover || "", year: game.year || "", release_ts: (game as any).release_ts ?? null,
     developer: game.developer || "", publisher: game.publisher || "", description: game.description || "",
     rating: game.rating ?? null, screenshots: game.screenshots || [], hltb: game.hltb || null,
     igdb_id: game.igdb_id ?? null, pricecharting_id: game.pricecharting_id ?? null, upc: game.upc ?? null, id: game.id,
@@ -1288,6 +1412,23 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
   const [priceTiers, setPriceTiers] = useState<PriceTiers | null>(game.priceTiers ?? null);
   const [pricedName, setPricedName] = useState<string>(game.priceTiers ? (game.title || "") : "");
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
+
+  // A game that isn't out yet can't be owned — only wishlisted. We prefer IGDB's
+  // precise release timestamp (day-level) when present, and fall back to the
+  // release year for games (e.g. edited entries) where we only have the year. When
+  // unreleased we force the status to wishlist and disable OWNED.
+  const releaseYear = Number(f.year) || null;
+  const isUnreleased = f.release_ts != null
+    ? f.release_ts * 1000 > Date.now()
+    : (releaseYear != null && releaseYear > new Date().getFullYear());
+  // Human label for the hint: the full date when we have it, else the year.
+  const releaseLabel = f.release_ts != null
+    ? new Date(f.release_ts * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })
+    : releaseYear;
+  useEffect(() => {
+    if (isUnreleased && f.status !== "wishlist") set("status", "wishlist");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isUnreleased]);
 
   // Systems IGDB lists for this game (mapped to our PLATFORMS), so the PLATFORM
   // dropdown can be narrowed to just what the game actually released on. Empty
@@ -1354,7 +1495,7 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
       setF((p: any) => {
         // Rating is intentionally left untouched — it's the user's own score to set,
         // so we never seed it from IGDB.
-        const next = { ...p, title: m.title || p.title, cover: m.cover || p.cover, description: m.description || p.description, developer: m.developer || p.developer, publisher: m.publisher || p.publisher, year: m.year || p.year, genre: genres.includes(m.genre) ? m.genre : p.genre, hltb: m.hltb || p.hltb, screenshots: m.screenshots?.length ? m.screenshots : p.screenshots, igdb_id: m.igdb_id ?? p.igdb_id };
+        const next = { ...p, title: m.title || p.title, cover: m.cover || p.cover, description: m.description || p.description, developer: m.developer || p.developer, publisher: m.publisher || p.publisher, year: m.year || p.year, release_ts: m.release_ts ?? p.release_ts, genre: genres.includes(m.genre) ? m.genre : p.genre, hltb: m.hltb || p.hltb, screenshots: m.screenshots?.length ? m.screenshots : p.screenshots, igdb_id: m.igdb_id ?? p.igdb_id };
         if (tiers) {
           next.pricecharting_id = m.price.pricecharting_id ?? p.pricecharting_id;
           const cents = tierForCondition(tiers, p.condition);
@@ -1465,13 +1606,15 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
 
   const save = () => {
     if (!f.title.trim()) return;
+    // An unreleased game can only be wishlisted, regardless of any earlier toggle.
+    const status = isUnreleased ? "wishlist" : f.status;
     onSave({
-      id: f.id, title: f.title, platform: f.platform, status: f.status, condition: f.condition,
+      id: f.id, title: f.title, platform: f.platform, status, condition: f.condition,
       region: f.region, genre: f.genre, year: Number(f.year) || null, developer: f.developer,
       publisher: f.publisher, rating: f.rating == null ? null : Number(f.rating),
       value_cents: (Number(f.value_eur) || 0) * 100, cover: f.cover, description: f.description,
       screenshots: f.screenshots, platforms: availablePlatforms, hltb: f.hltb, igdb_id: f.igdb_id, pricecharting_id: f.pricecharting_id ?? null,
-      myStatus: f.status === "owned" ? f.myStatus : undefined, myHours: Number(f.myHours) || 0,
+      myStatus: status === "owned" ? f.myStatus : undefined, myHours: Number(f.myHours) || 0,
     });
   };
 
@@ -1573,10 +1716,21 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
         <div style={{ marginBottom: 14 }}>
           <label style={lbl}>STATUS</label>
           <div style={{ display: "flex", gap: 8 }}>
-            {([["owned", "OWNED", Box], ["wishlist", "WISHLIST", Heart]] as const).map(([k, l, Ic]) => (
-              <button key={k} onClick={() => set("status", k)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "11px 0", border: `1px solid ${f.status === k ? "var(--accent2)" : "var(--line)"}`, borderRadius: "var(--radius)", cursor: "pointer", background: f.status === k ? "var(--accent2)22" : "var(--bg)", color: f.status === k ? "var(--ink)" : "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 12 }}><Ic size={15} /> {l}</button>
-            ))}
+            {([["owned", "OWNED", Box], ["wishlist", "WISHLIST", Heart]] as const).map(([k, l, Ic]) => {
+              const active = f.status === k;
+              const disabled = k === "owned" && isUnreleased;
+              return (
+                <button key={k} type="button" disabled={disabled} onClick={() => { if (!disabled) set("status", k); }}
+                  title={disabled ? "Not released yet — wishlist only" : undefined}
+                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "11px 0", border: `1px solid ${active ? "var(--accent2)" : "var(--line)"}`, borderRadius: "var(--radius)", cursor: disabled ? "not-allowed" : "pointer", background: active ? "var(--accent2)22" : "var(--bg)", color: active ? "var(--ink)" : "var(--ink-dim)", opacity: disabled ? 0.4 : 1, fontFamily: "var(--display)", fontWeight: 700, fontSize: 12 }}><Ic size={15} /> {l}</button>
+              );
+            })}
           </div>
+          {isUnreleased && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--display)", lineHeight: 1.4 }}>
+              <CalendarClock size={13} color="var(--accent3)" style={{ flexShrink: 0 }} /> Releases {releaseLabel} — wishlist only until it&apos;s out.
+            </div>
+          )}
         </div>
 
         {f.status === "owned" && (

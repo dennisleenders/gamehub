@@ -25,13 +25,13 @@ button, select, a, [role="button"] { touch-action: manipulation; }
 /* iOS auto-zooms the page when focusing a field whose text is < 16px. Pinning
    every form control to 16px is the only reliable way to stop that zoom. */
 input, select, textarea { font-size: 16px !important; }
-button, [role="button"], select, a, label, input { -webkit-tap-highlight-color: transparent; }
+button, [role="button"], select, a, label, input, .game-card, .shelf-item, .upcoming-row { -webkit-tap-highlight-color: transparent; }
 /* App-like polish, scoped to the INSTALLED standalone PWA only — never a normal
    browser tab or the device-mode emulator. Kills the rubber-band/pull-to-refresh
    overscroll and the iOS long-press callout/selection (fields stay selectable). */
 @media (display-mode: standalone) {
   html, body { overscroll-behavior: none; }
-  header, nav, button, [role="button"] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  header, nav, button, [role="button"], .game-card, .shelf-item, .upcoming-row { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   input, textarea, [contenteditable] { -webkit-touch-callout: default; -webkit-user-select: text; user-select: text; }
 }
 svg { display: block; }
@@ -104,6 +104,12 @@ input::placeholder, textarea::placeholder { color: #ffffff44; }
 .upcoming-card { content-visibility: auto; contain-intrinsic-size: auto 300px; }
 .upcoming-row { content-visibility: auto; contain-intrinsic-size: auto 72px; }
 .filter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+/* Collapsible filter block: the 0fr→1fr grid-row trick animates height without a
+   fixed max-height. The inner grid needs min-height:0 + overflow:hidden to clip. */
+.filter-collapse { display: grid; grid-template-rows: 0fr; opacity: 0; margin-top: 0;
+  transition: grid-template-rows .32s cubic-bezier(.4,0,.2,1), opacity .25s ease, margin-top .32s cubic-bezier(.4,0,.2,1); }
+.filter-collapse > .filter-grid { min-height: 0; overflow: hidden; }
+.filter-collapse.open { grid-template-rows: 1fr; opacity: 1; margin-top: 12px; }
 /* Bottom-nav pills: full labels on roomy screens, icon-only when the four pills
    would otherwise overflow a narrower phone/tablet. */
 .nav-pill { padding: 10px 18px; }

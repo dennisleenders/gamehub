@@ -63,6 +63,7 @@ export async function POST(req: Request) {
     developer: m.developer ?? "",
     publisher: m.publisher ?? "",
     year: m.year ?? null,
+    release_ts: m.releaseTs ?? null,
     genre: m.genre ?? "",
     rating: m.rating ?? null,
     screenshots: m.screenshots ?? [],

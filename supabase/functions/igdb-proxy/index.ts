@@ -15,6 +15,8 @@ let cachedToken: { value: string; expires: number } | null = null;
 // Upcoming releases change slowly; cache the built list per-window on the warm
 // instance so repeated dashboard loads don't each hit IGDB.
 let cachedUpcoming: { key: string; value: unknown; expires: number } | null = null;
+// Industry events change slowly too; cache the built list per-window the same way.
+let cachedEvents: { key: string; value: unknown; expires: number } | null = null;
 
 async function getToken(): Promise<string> {
   if (cachedToken && cachedToken.expires > Date.now() + 60_000) return cachedToken.value;
@@ -70,6 +72,9 @@ async function search(headers: Record<string, string>, title: string, igdbId?: n
       cover: g.cover?.image_id ? imgUrl(g.cover.image_id) : "",
       description: g.summary ?? "",
       year: g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null,
+      // Earliest release across platforms, in unix seconds (null if IGDB has no
+      // date yet). Lets the client gate "owned" on a precise, day-level date.
+      releaseTs: g.first_release_date ?? null,
       rating: g.rating ? Math.round(g.rating) : null,
       genre: g.genres?.[0]?.name ?? "",
       developer,
@@ -203,12 +208,100 @@ async function upcoming(headers: Record<string, string>, months: number, limit: 
   return json({ games: list });
 }
 
+// Games-industry showcases/conferences from IGDB's /v4/events endpoint (Summer
+// Game Fest, Nintendo Direct, State of Play, gamescom, …). We pull a window
+// around "now" — a little past + several months ahead — so the client can split
+// them into upcoming / live now / passed. Query is built server-side — no
+// injection. `description` is IGDB's plain-text blurb; `event_logo` is a wide
+// landscape logo served by the same image CDN as covers.
+const EVENT_FIELDS =
+  "fields name, description, start_time, end_time, live_stream_url, event_logo.image_id;";
+
+async function igdbEvents(headers: Record<string, string>, body: string): Promise<{ ok: boolean; data: any }> {
+  const res = await fetch("https://api.igdb.com/v4/events", { method: "POST", headers, body });
+  const data = await res.json().catch(() => null);
+  return { ok: res.ok && Array.isArray(data), data };
+}
+
+async function events(headers: Record<string, string>, pastMonths: number, futureMonths: number, limit: number) {
+  const back = new Date();
+  back.setMonth(back.getMonth() - pastMonths);
+  const from = Math.floor(back.getTime() / 1000);
+  const ahead = new Date();
+  ahead.setMonth(ahead.getMonth() + futureMonths);
+  const to = Math.floor(ahead.getTime() / 1000);
+
+  // Only events with a known start time, inside the window, soonest first.
+  const where = `start_time != null & start_time >= ${from} & start_time <= ${to}`;
+  const { ok, data } = await igdbEvents(headers, `${EVENT_FIELDS} where ${where}; sort start_time asc; limit ${limit};`);
+  if (!ok) return json({ events: [], error: data });
+
+  const list = (data as any[])
+    .map((e: any) => ({
+      id: e.id,
+      name: e.name ?? "",
+      description: typeof e.description === "string" ? e.description : "",
+      startTime: typeof e.start_time === "number" ? e.start_time : null,
+      endTime: typeof e.end_time === "number" ? e.end_time : null,
+      liveStreamUrl: typeof e.live_stream_url === "string" ? e.live_stream_url : "",
+      logo: e.event_logo?.image_id ? imgUrl(e.event_logo.image_id, "t_720p") : "",
+    }))
+    .filter((e) => e.name && e.startTime);
+  return json({ events: list });
+}
+
+// A single event's announced/featured games, for the event detail modal. Games
+// come back in the UpcomingGame shape so the client reuses its wishlist plumbing
+// (heart toggle + owned/wishlisted sets) unchanged. Most-anticipated first.
+// Query is built server-side — no injection (id is clamped to a positive int by
+// the dispatcher). Cached per-event on the warm instance like the other modes.
+const eventGamesCache = new Map<number, { value: unknown; expires: number }>();
+async function eventDetail(headers: Record<string, string>, id: number) {
+  const cached = eventGamesCache.get(id);
+  if (cached && cached.expires > Date.now()) return json(cached.value);
+
+  const body = `
+    fields games.name, games.hypes, games.cover.image_id,
+           games.platforms.abbreviation, games.platforms.name,
+           games.genres.name, games.first_release_date;
+    where id = ${id};
+    limit 1;
+  `;
+  const res = await fetch("https://api.igdb.com/v4/events", { method: "POST", headers, body });
+  const data = await res.json().catch(() => null);
+  const ev = Array.isArray(data) ? data[0] : null;
+  if (!ev) return json({ games: [] });
+
+  const games = ((ev.games ?? []) as any[])
+    .map((g: any) => ({
+      igdbId: g.id,
+      title: g.name ?? "",
+      cover: g.cover?.image_id ? imgUrl(g.cover.image_id) : "",
+      releaseDate: typeof g.first_release_date === "number" ? g.first_release_date : 0, // 0 = unknown
+      platforms: (g.platforms ?? [])
+        .map((p: any) => p.abbreviation || p.name)
+        .filter((x: unknown): x is string => typeof x === "string" && x.length > 0),
+      genre: g.genres?.[0]?.name ?? "",
+      hype: g.hypes ?? 0,
+      maxPlayers: 0,
+      mpTypes: [] as string[],
+    }))
+    .filter((g) => g.title)
+    .sort((a, b) => b.hype - a.hype);
+
+  const value = { games };
+  if (games.length) eventGamesCache.set(id, { value, expires: Date.now() + 6 * 3600_000 });
+  return json(value);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
     const payload = await req.json().catch(() => ({}));
     const mode =
       payload?.mode === "upcoming" ? "upcoming" :
+      payload?.mode === "events" ? "events" :
+      payload?.mode === "event" ? "event" :
       payload?.mode === "suggest" ? "suggest" : "search";
 
     const token = await getToken();
@@ -235,6 +328,31 @@ Deno.serve(async (req) => {
         cachedUpcoming = { key, value, expires: Date.now() + 6 * 3600_000 };
       }
       return res;
+    }
+
+    if (mode === "events") {
+      const pastMonths = clampInt(payload?.pastMonths, 0, 12, 1);
+      const futureMonths = clampInt(payload?.futureMonths, 1, 24, 12);
+      const limit = clampInt(payload?.limit, 1, 200, 100);
+      const key = `${pastMonths}:${futureMonths}:${limit}`;
+      if (cachedEvents && cachedEvents.key === key && cachedEvents.expires > Date.now()) {
+        return json(cachedEvents.value);
+      }
+      const res = await events(headers, pastMonths, futureMonths, limit);
+      // Cache a successful, non-empty result for 6h — never pin an error or an
+      // empty list (which would survive a transient IGDB hiccup).
+      const value = await res.clone().json();
+      if (Array.isArray(value?.events) && value.events.length > 0) {
+        cachedEvents = { key, value, expires: Date.now() + 6 * 3600_000 };
+      }
+      return res;
+    }
+
+    if (mode === "event") {
+      const rawId = payload?.id;
+      const id = Number.isFinite(Number(rawId)) && Number(rawId) > 0 ? Math.floor(Number(rawId)) : 0;
+      if (!id) return json({ games: [] });
+      return await eventDetail(headers, id);
     }
 
     if (mode === "suggest") {

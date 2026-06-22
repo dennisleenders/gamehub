@@ -51,6 +51,7 @@ export const OVERVIEW_SECTIONS = [
   { key: "recently_added", label: "Recently Added" },
   { key: "recently_played", label: "Recently Played" },
   { key: "upcoming", label: "Upcoming Games" },
+  { key: "events", label: "Game Events" },
   { key: "most_valued", label: "Most Valued" },
   { key: "by_system", label: "By System" },
   { key: "collection_value", label: "Estimated Value" },
@@ -69,6 +70,21 @@ export interface UpcomingGame {
   hype: number;         // IGDB pre-release follow count
   maxPlayers: number;   // highest player count across multiplayer modes (0 = unknown/single-player)
   mpTypes: string[];    // multiplayer kinds offered: "online" | "couch" | "split" | "lan"
+}
+
+// A games-industry showcase/conference from IGDB's /v4/events endpoint (Summer
+// Game Fest, Nintendo Direct, State of Play, gamescom, …). Surfaced in the
+// Upcoming view's Events section. Not stored in our DB — fetched live via
+// /api/events. Times are unix seconds; the client splits events into
+// upcoming / live now / passed by comparing them against the current time.
+export interface GameEvent {
+  id: number;
+  name: string;
+  description: string;
+  startTime: number | null; // unix seconds (null only if IGDB has no time)
+  endTime: number | null;   // unix seconds, or null when IGDB omits it
+  liveStreamUrl: string;    // official stream URL, or "" when absent
+  logo: string;             // event logo image URL, or "" when absent
 }
 
 export interface ProgressRow {
