@@ -6,6 +6,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, Pencil, Loader2, ImageIcon, Library, Joystick,
   ScanLine, Settings, LogOut, Clock, Tag, Star, CalendarClock, Play, Minus,
   Home, Ticket, Copy, RefreshCw, Crown, UserMinus, Trash2, Users, Grid2x2, List, SlidersHorizontal, Radio,
+  Bell, Share2,
 } from "lucide-react";
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
@@ -19,15 +20,25 @@ import { useEvents } from "@/lib/useEvents";
 import { useAchievementToasts } from "@/components/useAchievementToasts";
 import { Confetti } from "@/components/achievements/Confetti";
 import type { UnlockEvent } from "@/lib/achievements";
+import { ACHIEVEMENTS, TIER_LABEL } from "@/lib/achievements";
 import { Avatar, AvatarPickerModal } from "@/components/Avatar";
 import Splash from "@/components/Splash";
 import TutorialOverlay, { type TutorialStep } from "@/components/TutorialOverlay";
 import { avatarSrc } from "@/lib/avatars";
+import { usePush, sendPush } from "@/lib/usePush";
+import { useWakeLock } from "@/lib/useWakeLock";
+import { useAppBadge } from "@/lib/useAppBadge";
+import { shareOrCopy } from "@/lib/share";
+import { useToast } from "@/components/Toast";
+import DataTransfer from "@/components/DataTransfer";
 import {
   type Game, type Profile, type PlayStatus, type UpcomingGame, type GameEvent, type Household, type HouseholdRole,
   type MemberWithProfile, PLAY_STATUS, PLATFORM_TINT,
   CONDITIONS, PLATFORMS, OVERVIEW_SECTIONS, money, fmtDate, igdbPlatformsToApp,
 } from "@/lib/types";
+
+// achievement id → display name, for the unlock push message.
+const ACH_NAME: Record<string, string> = Object.fromEntries(ACHIEVEMENTS.map((a) => [a.id, a.name]));
 
 const FALLBACK_TINTS = ["#9b8cff", "#6fc7b3", "#e6b667", "#e0738a", "#7fb2ff", "#c98cff"];
 const hashIdx = (s = "", n = 1) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 9973; return h % n; };
@@ -86,8 +97,11 @@ const TUTORIAL_STEPS: TutorialStep[] = [
 
 export default function VaultApp({ currentUser, household, role }: { currentUser: Profile; household: Household; role: HouseholdRole }) {
   const uid = currentUser.id;
-  const { games, profiles, members, challenges, unlocks, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, recordUnlock, saveSettings, savePreferences, saveProfile, renameVault, regenerateInvite, removeMember, leaveVault } = useVault(uid, household.id);
+  const { games, profiles, members, challenges, unlocks, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, importGames, saveChallenge, deleteChallenge, recordUnlock, saveSettings, savePreferences, saveProfile, renameVault, regenerateInvite, removeMember, leaveVault } = useVault(uid, household.id);
   const userById = (id?: string | null) => profiles.find((p) => p.id === id) || null;
+  // PWA: per-device push subscription state + the app-icon badge controller.
+  const push = usePush(uid, household.id);
+  const { bump: bumpBadge } = useAppBadge();
 
   // Live current profile (reflects reloads after saving prefs); falls back to the
   // server-passed prop before the first load completes.
@@ -104,6 +118,8 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
   const [userMenu, setUserMenu] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
+  // Keep the screen awake while the barcode scanner is open (released on close).
+  useWakeLock(scanOpen);
   const [creatingChallenge, setCreatingChallenge] = useState(false);
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
@@ -169,13 +185,32 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
     setConfettiKey((k) => k + 1);
     if (celebrateTimer.current) clearTimeout(celebrateTimer.current);
     celebrateTimer.current = setTimeout(() => { setJustUnlocked(new Set()); setConfettiKey(0); }, 2600);
-  }, []);
+    // Push the household: these are the current user's in-session unlocks.
+    if (events.length === 1) {
+      sendPush({ title: `${me.name} unlocked ${TIER_LABEL[events[0].tier]}`, body: ACH_NAME[events[0].achievementId] ?? "an achievement", url: "/" });
+    } else if (events.length > 1) {
+      sendPush({ title: `${me.name} unlocked ${events.length} achievements`, url: "/" });
+    }
+  }, [me.name]);
   useEffect(() => () => { if (celebrateTimer.current) clearTimeout(celebrateTimer.current); }, []);
 
   // Pop a toast whenever you cross an achievement tier, persist the unlock moment,
   // and fire the celebration. Gated on !loading so the baseline is taken from
   // fully-loaded data (no notification spam on first load).
   useAchievementToasts(games, profiles, uid, !loading, { recordUnlock, onCelebrate });
+
+  // App-icon badge: when the shared collection grows while this device is
+  // backgrounded, badge the delta (a partner added games). bump() no-ops while the
+  // app is visible, so the user's own adds never badge; the badge clears on focus
+  // (useAppBadge). Finishes don't change the count, so they're not badged here —
+  // intentionally the lightest of the PWA touches.
+  const prevGamesLen = useRef<number | null>(null);
+  useEffect(() => {
+    if (loading) return;
+    if (prevGamesLen.current === null) { prevGamesLen.current = games.length; return; }
+    for (let i = prevGamesLen.current; i < games.length; i++) bumpBadge();
+    prevGamesLen.current = games.length;
+  }, [games.length, loading, bumpBadge]);
 
   // Upcoming releases (IGDB) — fetched lazily, only once the dashboard block is
   // shown or the Upcoming view is opened, so we don't hit IGDB needlessly.
@@ -611,7 +646,11 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
       </nav>
 
       {liveDetail && <DetailView game={liveDetail} userById={userById} currentUser={me}
-        onProgress={(status, hours) => saveGame({ id: liveDetail.id, status: "owned", myStatus: status, myHours: hours })}
+        onProgress={async (status, hours) => {
+          await saveGame({ id: liveDetail.id, status: "owned", myStatus: status, myHours: hours });
+          // Tell the rest of the household when you finish a game.
+          if (status === "finished") sendPush({ title: `${me.name} finished a game`, body: liveDetail.title, url: "/" });
+        }}
         onSetValue={(cents) => saveGame({ id: liveDetail.id, value_cents: cents })}
         onClose={() => setDetail(null)} onEdit={() => setEditing(liveDetail)} />}
       {upcomingDetail && (
@@ -633,19 +672,26 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
       {editing !== null && (
         <GameModal game={editing} currentUser={currentUser} genres={genres} priceEnabled={priceChartingEnabled}
           onClose={() => setEditing(null)}
-          onSave={async (g) => { await saveGame(g); setEditing(null); }}
+          onSave={async (g) => {
+            const isNew = !g.id;
+            await saveGame(g);
+            // A brand-new entry (manual add or scan) notifies the household.
+            if (isNew) sendPush({ title: `${me.name} added a game`, body: g.title ?? "", url: "/" });
+            setEditing(null);
+          }}
           onDelete={async (id) => { await deleteGame(id); setEditing(null); setDetail(null); }} />
       )}
       {settingsOpen && (
         <SettingsModal preferences={me.preferences} priceEnabled={priceChartingEnabled} priceTokenSet={priceChartingTokenSet}
           household={household} role={role} members={members} currentUserId={uid}
+          push={push} games={games} onImportGames={importGames}
           onRenameVault={renameVault} onRegenerateInvite={regenerateInvite} onRemoveMember={removeMember} onLeaveVault={leaveVault}
           onSave={saveSettings} onSavePreferences={savePreferences} onClose={() => setSettingsOpen(false)} />
       )}
       {confettiKey > 0 && <Confetti key={confettiKey} />}
       {creatingChallenge && (
         <CreateChallengeModal currentUser={me} onClose={() => setCreatingChallenge(false)}
-          onSave={async (c) => { await saveChallenge(c); setCreatingChallenge(false); }} />
+          onSave={async (c) => { await saveChallenge(c); sendPush({ title: "New challenge", body: c.title ?? "", url: "/" }); setCreatingChallenge(false); }} />
       )}
       {avatarOpen && (
         <AvatarPickerModal currentUser={me} others={profiles.filter((p) => p.id !== uid)} onClose={() => setAvatarOpen(false)} onSave={saveProfile} />
@@ -1090,6 +1136,14 @@ function DetailView({ game, userById, currentUser, onProgress, onClose, onEdit, 
   const g = game;
   const tint = tintFor(g.platform);
   const addedByUser = userById(g.added_by);
+  const { notify } = useToast();
+  const share = async () => {
+    const res = await shareOrCopy({
+      title: g.title,
+      text: `${g.title}${g.platform ? ` (${g.platform})` : ""} — in our GameVault`,
+    });
+    if (res === "copied") notify({ title: "Link copied", message: "Share it anywhere." });
+  };
   // Inline quick-edit for the market value. `valDraft` holds the euro string
   // while editing (null = not editing); the displayed/stored value is in cents.
   const [valDraft, setValDraft] = useState<string | null>(null);
@@ -1106,7 +1160,10 @@ function DetailView({ game, userById, currentUser, onProgress, onClose, onEdit, 
       <div onClick={(e) => e.stopPropagation()} className="sheet" style={{ width: "100%", maxWidth: 560, maxHeight: "calc(94vh - env(safe-area-inset-top))", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
         <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", background: "var(--panel)", borderBottom: "1px solid var(--line)" }}>
           <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)", fontFamily: "var(--display)", fontSize: 12, fontWeight: 700 }}><ChevronLeft size={17} /> BACK</button>
-          <button onClick={onEdit} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)", fontFamily: "var(--display)", fontSize: 12, fontWeight: 700 }}><Pencil size={14} /> EDIT</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <button onClick={share} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)", fontFamily: "var(--display)", fontSize: 12, fontWeight: 700 }}><Share2 size={14} /> SHARE</button>
+            <button onClick={onEdit} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)", fontFamily: "var(--display)", fontSize: 12, fontWeight: 700 }}><Pencil size={14} /> EDIT</button>
+          </div>
         </div>
         <div style={{ padding: "20px 20px calc(20px + env(safe-area-inset-bottom))", overflowY: "auto", overflowX: "hidden", flex: 1, minHeight: 0 }}>
           <div style={{ display: "flex", gap: 18 }}>
@@ -1868,9 +1925,12 @@ function GameModal({ game, currentUser, genres, priceEnabled, onSave, onDelete, 
   );
 }
 
-function SettingsModal({ preferences, priceEnabled, priceTokenSet, household, role, members, currentUserId, onRenameVault, onRegenerateInvite, onRemoveMember, onLeaveVault, onSave, onSavePreferences, onClose }: {
+function SettingsModal({ preferences, priceEnabled, priceTokenSet, household, role, members, currentUserId, push, games, onImportGames, onRenameVault, onRegenerateInvite, onRemoveMember, onLeaveVault, onSave, onSavePreferences, onClose }: {
   preferences: Profile["preferences"]; priceEnabled: boolean; priceTokenSet: boolean;
   household: Household; role: HouseholdRole; members: MemberWithProfile[]; currentUserId: string;
+  push: ReturnType<typeof usePush>;
+  games: Game[];
+  onImportGames: (rows: Partial<Game>[]) => Promise<number>;
   onRenameVault: (name: string) => Promise<void> | void;
   onRegenerateInvite: () => Promise<string | null>;
   onRemoveMember: (userId: string) => Promise<void> | void;
@@ -1893,7 +1953,7 @@ function SettingsModal({ preferences, priceEnabled, priceTokenSet, household, ro
   const [confirmLeave, setConfirmLeave] = useState(false);
   // Settings is a menu: null shows the three section buttons; a value drills into
   // that pane (with a back arrow in the header).
-  const [pane, setPane] = useState<"vault" | "dashboard" | "api" | null>(null);
+  const [pane, setPane] = useState<"vault" | "dashboard" | "api" | "app" | null>(null);
   // Leaving as the sole member deletes the vault (and all its games) — warn for that.
   const soleMember = members.length <= 1;
   const inviteLink = typeof window !== "undefined" ? `${window.location.origin}/join/${code}` : `/join/${code}`;
@@ -1918,12 +1978,13 @@ function SettingsModal({ preferences, priceEnabled, priceTokenSet, household, ro
   const lbl: React.CSSProperties = { fontSize: 10, letterSpacing: 1.5, color: "var(--ink-dim)", fontFamily: "var(--display)", fontWeight: 700, marginBottom: 8, display: "block" };
   const inp: React.CSSProperties = { flex: 1, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", color: "var(--ink)", padding: "10px 12px", fontSize: 14, fontFamily: "var(--body)", outline: "none", boxSizing: "border-box" };
 
-  const menu: { key: "vault" | "dashboard" | "api"; icon: typeof Home; title: string; desc: string }[] = [
+  const menu: { key: "vault" | "dashboard" | "api" | "app"; icon: typeof Home; title: string; desc: string }[] = [
     { key: "vault", icon: Home, title: "Your Vault", desc: isOwner ? "Name, invite link & members" : "Members & leaving the vault" },
     { key: "dashboard", icon: LayoutGrid, title: "Dashboard Customization", desc: "Choose which overview blocks show" },
+    { key: "app", icon: Bell, title: "Notifications & Data", desc: "Push alerts · import / export" },
     { key: "api", icon: Tag, title: "External API's", desc: "PriceCharting pricing & token" },
   ];
-  const paneTitle = pane === "vault" ? "YOUR VAULT" : pane === "dashboard" ? "DASHBOARD" : pane === "api" ? "EXTERNAL API'S" : "SETTINGS";
+  const paneTitle = pane === "vault" ? "YOUR VAULT" : pane === "dashboard" ? "DASHBOARD" : pane === "api" ? "EXTERNAL API'S" : pane === "app" ? "NOTIFICATIONS & DATA" : "SETTINGS";
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} className="sheet-backdrop">
@@ -2123,6 +2184,39 @@ function SettingsModal({ preferences, priceEnabled, priceTokenSet, household, ro
               );
             })}
           </div>
+        </div>
+        )}
+
+        {/* ---- NOTIFICATIONS & DATA ---- */}
+        {pane === "app" && (
+        <div>
+          <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}><Bell size={12} />Notifications</label>
+          <div style={{ fontSize: 11.5, color: "var(--ink-dim)", lineHeight: 1.5, marginBottom: 12 }}>
+            Get a push on this device when someone in the vault finishes or adds a game, starts a challenge, or unlocks an achievement. Set per device. On iPhone, add GameVault to your Home Screen first.
+          </div>
+          {push.supported ? (
+            <button role="switch" aria-checked={push.state === "subscribed"} disabled={push.busy || push.state === "denied"}
+              onClick={() => { if (push.state === "subscribed") push.unsubscribe(); else push.subscribe(); }}
+              style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 14px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", cursor: push.busy || push.state === "denied" ? "default" : "pointer", color: "var(--ink)", textAlign: "left", opacity: push.state === "denied" ? 0.6 : 1 }}>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 700 }}>{push.state === "denied" ? "Notifications blocked" : "Enable notifications"}</span>
+                {push.state === "denied" && <span style={{ display: "block", fontSize: 11, color: "var(--ink-dim)", fontWeight: 400, marginTop: 3, lineHeight: 1.4 }}>Allow them for GameVault in your browser or OS settings, then come back.</span>}
+              </span>
+              <span style={{ flexShrink: 0, position: "relative", width: 40, height: 23, borderRadius: 99, background: push.state === "subscribed" ? "var(--accent2)" : "var(--panel-alt)", border: "1px solid var(--line)", transition: "background .15s" }}>
+                <span style={{ position: "absolute", top: 2, left: push.state === "subscribed" ? 19 : 2, width: 17, height: 17, borderRadius: 99, background: push.state === "subscribed" ? "var(--bg)" : "var(--ink-dim)", transition: "left .15s" }} />
+              </span>
+            </button>
+          ) : (
+            <div style={{ padding: "13px 14px", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: "var(--radius)", fontSize: 12.5, color: "var(--ink-dim)", lineHeight: 1.5 }}>
+              Push notifications aren&apos;t available here. On iPhone, install GameVault to your Home Screen (Share → Add to Home Screen) to turn them on.
+            </div>
+          )}
+
+          <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 6, margin: "22px 0 4px" }}><Library size={12} />Collection backup</label>
+          <div style={{ fontSize: 11.5, color: "var(--ink-dim)", lineHeight: 1.5, marginBottom: 12 }}>
+            Export the whole vault to a file, or import games from a GameVault JSON backup. Duplicates (same IGDB id, or title + platform) are skipped on import.
+          </div>
+          <DataTransfer games={games} importGames={onImportGames} />
         </div>
         )}
       </div>

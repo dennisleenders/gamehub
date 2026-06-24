@@ -152,6 +152,18 @@ export function useVault(currentUserId: string, householdId: string) {
     await load();
   }, [supabase, load]);
 
+  // Bulk-add catalogue entries (JSON import). Stamps ownership + household on each
+  // row and reloads ONCE, rather than paying saveGame's per-row reload N times.
+  // No per-user progress is created — import recreates the shared catalogue only.
+  const importGames = useCallback(async (rows: Partial<Game>[]): Promise<number> => {
+    if (!rows.length) return 0;
+    const stamped = rows.map((r) => ({ ...r, added_by: currentUserId, household_id: householdId }));
+    const { data, error } = await supabase.from("games").insert(stamped).select("id");
+    await load();
+    if (error) throw error;
+    return data?.length ?? 0;
+  }, [supabase, currentUserId, householdId, load]);
+
   // Create or update a challenge. New ones are stamped with the current user as
   // creator (RLS requires created_by = auth.uid() on insert, and limits later
   // edits/deletes to the creator).
@@ -240,5 +252,5 @@ export function useVault(currentUserId: string, householdId: string) {
     if (error) throw error;
   }, [supabase]);
 
-  return { games, profiles, members, challenges, unlocks, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, recordUnlock, saveSettings, savePreferences, saveProfile, renameVault, regenerateInvite, removeMember, leaveVault, reload: load };
+  return { games, profiles, members, challenges, unlocks, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, importGames, saveChallenge, deleteChallenge, recordUnlock, saveSettings, savePreferences, saveProfile, renameVault, regenerateInvite, removeMember, leaveVault, reload: load };
 }

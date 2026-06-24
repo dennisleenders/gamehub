@@ -1,9 +1,11 @@
 "use client";
 
-import { X, Check, Lock, Crown, Users, Award } from "lucide-react";
+import { X, Check, Lock, Crown, Users, Award, Share2 } from "lucide-react";
 import type { AchievementUnlock, Profile } from "@/lib/types";
 import { fmtDate } from "@/lib/types";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
+import { shareOrCopy } from "@/lib/share";
+import { useToast } from "@/components/Toast";
 import {
   TIER_COLOR, TIER_LABEL, TIER_POINTS, tierCoverage, remainingToNext, unlockedAtFor,
   type AchievementDef, type AchievementProgress, type UserStats,
@@ -29,6 +31,12 @@ export function AchievementDetailSheet({
   const headColor = p.currentTier ? TIER_COLOR[p.currentTier] : "var(--accent)";
   const Icon = ICONS[def.icon ?? ""] ?? Award;
   const rem = remainingToNext(p);
+  const { notify } = useToast();
+  const share = async () => {
+    const status = maxed ? "maxed out (Platinum)" : p.currentTier ? `${TIER_LABEL[p.currentTier]} unlocked` : "on my list";
+    const res = await shareOrCopy({ title: def.name, text: `${def.name} — ${status} in GameVault` });
+    if (res === "copied") notify({ title: "Copied", message: "Achievement copied to clipboard." });
+  };
 
   return (
     <div onClick={onClose} className="sheet-backdrop" style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }}>
@@ -43,7 +51,10 @@ export function AchievementDetailSheet({
               {maxed ? "MAXED · PLATINUM" : p.currentTier ? `${TIER_LABEL[p.currentTier]} · ${p.points}/${p.maxPoints} PTS` : `LOCKED · 0/${p.maxPoints} PTS`}
             </div>
           </div>
-          <button onClick={onClose} aria-label="Close" style={{ display: "grid", placeItems: "center", width: 32, height: 32, flexShrink: 0, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><X size={16} /></button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <button onClick={share} aria-label="Share" style={{ display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><Share2 size={15} /></button>
+            <button onClick={onClose} aria-label="Close" style={{ display: "grid", placeItems: "center", width: 32, height: 32, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink)", padding: 0 }}><X size={16} /></button>
+          </div>
         </div>
 
         <div style={{ fontSize: 13, color: "var(--ink-dim)", lineHeight: 1.5, margin: "14px 0 4px" }}>{def.description}</div>

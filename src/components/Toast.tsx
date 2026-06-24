@@ -18,6 +18,8 @@ export interface ToastInput {
   icon?: ReactNode;
   /** Auto-dismiss delay in ms. Default 5000. 0 keeps it until closed. */
   duration?: number;
+  /** If set, the card becomes tappable and runs this on click (e.g. "refresh to update"). */
+  onClick?: () => void;
 }
 
 interface ToastItem extends ToastInput {
@@ -82,17 +84,23 @@ function ToastViewport({ toasts, onClose }: { toasts: ToastItem[]; onClose: (id:
 function ToastCard({ toast, onClose }: { toast: ToastItem; onClose: () => void }) {
   const accent = toast.accent || "var(--accent2)";
   return (
-    <div className={toast.leaving ? "toast toast-out" : "toast toast-in"} style={{
-      pointerEvents: "auto", width: "100%", maxWidth: 420, display: "flex", alignItems: "flex-start", gap: 11,
-      background: "var(--panel)", border: "1px solid var(--line)", borderLeft: `3px solid ${accent}`,
-      borderRadius: "var(--radius)", padding: "12px 12px 12px 14px", boxShadow: "0 14px 34px -12px #000",
-    }}>
+    <div
+      className={toast.leaving ? "toast toast-out" : "toast toast-in"}
+      onClick={toast.onClick ? () => toast.onClick!() : undefined}
+      role={toast.onClick ? "button" : undefined}
+      style={{
+        pointerEvents: "auto", width: "100%", maxWidth: 420, display: "flex", alignItems: "flex-start", gap: 11,
+        background: "var(--panel)", border: "1px solid var(--line)", borderLeft: `3px solid ${accent}`,
+        borderRadius: "var(--radius)", padding: "12px 12px 12px 14px", boxShadow: "0 14px 34px -12px #000",
+        cursor: toast.onClick ? "pointer" : "default",
+      }}
+    >
       {toast.icon && <span style={{ flexShrink: 0, color: accent, marginTop: 1, lineHeight: 0 }}>{toast.icon}</span>}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 800, fontFamily: "var(--display)" }}>{toast.title}</div>
         {toast.message && <div style={{ fontSize: 12.5, color: "var(--ink-dim)", marginTop: 3, lineHeight: 1.4 }}>{toast.message}</div>}
       </div>
-      <button onClick={onClose} aria-label="Dismiss" style={{
+      <button onClick={(e) => { e.stopPropagation(); onClose(); }} aria-label="Dismiss" style={{
         flexShrink: 0, display: "grid", placeItems: "center", width: 24, height: 24, padding: 0,
         background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer", color: "var(--ink-dim)",
       }}>

@@ -1,6 +1,6 @@
 // GameVault service worker — hand-rolled, zero deps. Bump CACHE_VERSION to force
 // clients to drop old caches after a deploy.
-const CACHE_VERSION = "gv-v1";
+const CACHE_VERSION = "gv-v2";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 
@@ -9,10 +9,18 @@ const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const SHELL_URLS = ["/"];
 
 self.addEventListener("install", (event) => {
-  self.skipWaiting();
+  // NOTE: we deliberately do NOT skipWaiting() here. A new worker waits until the
+  // user accepts the in-app "Update available" prompt (RegisterSW.tsx), which
+  // posts SKIP_WAITING below — a controlled update instead of swapping chunks out
+  // from under a live session.
   event.waitUntil(
     caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL_URLS).catch(() => {})),
   );
+});
+
+// The update prompt asks the waiting worker to activate immediately.
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
@@ -88,4 +96,41 @@ self.addEventListener("fetch", (event) => {
     );
   }
   // Everything else: default network handling.
+});
+
+// --- Web Push -------------------------------------------------------------
+// Payload is { title, body, url } sent by the push-send Edge Function. On iOS
+// this only fires for an installed (home-screen) PWA; showNotification is
+// mandatory there (userVisibleOnly subscriptions must always show UI).
+self.addEventListener("push", (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch { /* non-JSON push */ }
+  const title = data.title || "GameVault";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || "",
+      icon: "/icons/192",
+      badge: "/icons/192",
+      data: { url: data.url || "/" },
+    }),
+  );
+});
+
+// Tapping a notification focuses an open GameVault tab (navigating it to the
+// target) or opens a new one.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || "/";
+  event.waitUntil(
+    (async () => {
+      const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const client of all) {
+        if ("focus" in client) {
+          if ("navigate" in client) { try { await client.navigate(target); } catch { /* ignore */ } }
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(target);
+    })(),
+  );
 });

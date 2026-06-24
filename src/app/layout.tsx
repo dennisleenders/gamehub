@@ -50,8 +50,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
-        <ToastProvider>{children}</ToastProvider>
-        <RegisterSW />
+        <ToastProvider>
+          {children}
+          {/* Inside the provider so it can surface the "update available" toast. */}
+          <RegisterSW />
+        </ToastProvider>
         <IosInstallHint />
         <NoZoom />
       </body>
