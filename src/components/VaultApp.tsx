@@ -99,9 +99,11 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
   const uid = currentUser.id;
   const { games, profiles, members, challenges, unlocks, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, importGames, saveChallenge, deleteChallenge, recordUnlock, saveSettings, savePreferences, saveProfile, renameVault, regenerateInvite, removeMember, leaveVault } = useVault(uid, household.id);
   const userById = (id?: string | null) => profiles.find((p) => p.id === id) || null;
-  // PWA: per-device push subscription state + the app-icon badge controller.
+  // PWA: per-device push subscription state. The app-icon badge is SET by the
+  // service worker's push handler (the only code that runs while the app is
+  // closed); useAppBadge just CLEARS it when you return to the app.
   const push = usePush(uid, household.id);
-  const { bump: bumpBadge } = useAppBadge();
+  useAppBadge();
 
   // Live current profile (reflects reloads after saving prefs); falls back to the
   // server-passed prop before the first load completes.
@@ -198,19 +200,6 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
   // and fire the celebration. Gated on !loading so the baseline is taken from
   // fully-loaded data (no notification spam on first load).
   useAchievementToasts(games, profiles, uid, !loading, { recordUnlock, onCelebrate });
-
-  // App-icon badge: when the shared collection grows while this device is
-  // backgrounded, badge the delta (a partner added games). bump() no-ops while the
-  // app is visible, so the user's own adds never badge; the badge clears on focus
-  // (useAppBadge). Finishes don't change the count, so they're not badged here —
-  // intentionally the lightest of the PWA touches.
-  const prevGamesLen = useRef<number | null>(null);
-  useEffect(() => {
-    if (loading) return;
-    if (prevGamesLen.current === null) { prevGamesLen.current = games.length; return; }
-    for (let i = prevGamesLen.current; i < games.length; i++) bumpBadge();
-    prevGamesLen.current = games.length;
-  }, [games.length, loading, bumpBadge]);
 
   // Upcoming releases (IGDB) — fetched lazily, only once the dashboard block is
   // shown or the Upcoming view is opened, so we don't hit IGDB needlessly.

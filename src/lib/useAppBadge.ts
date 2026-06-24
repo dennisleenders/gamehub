@@ -1,36 +1,27 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect } from "react";
 
-// Drives the home-screen app-icon badge on an installed PWA (iOS 16.4+ / Android).
-// `bump()` increments the count when new partner activity arrives while the app is
-// backgrounded; the badge clears the moment the user returns. The count is
-// intentionally ephemeral (not persisted) — a "since you last looked" nudge, not
-// a durable inbox count.
+// Clears the home-screen app-icon badge whenever the app is open / brought to the
+// foreground. The badge is SET by the service worker's push handler (the only code
+// that runs while the app is closed on iOS) — this hook just makes sure it goes
+// away the moment you actually look at the app. No-op where badging is unsupported.
 export function useAppBadge() {
-  const countRef = useRef(0);
-  const supported = typeof navigator !== "undefined" && "setAppBadge" in navigator;
-
-  const clear = useCallback(() => {
-    countRef.current = 0;
-    if (supported) navigator.clearAppBadge?.().catch(() => {});
-  }, [supported]);
-
-  const bump = useCallback(() => {
-    if (!supported) return;
-    // Foreground activity is already visible in the UI — only badge when hidden.
-    if (typeof document !== "undefined" && document.visibilityState === "visible") return;
-    countRef.current += 1;
-    navigator.setAppBadge?.(countRef.current).catch(() => {});
-  }, [supported]);
-
   useEffect(() => {
+    const supported = typeof navigator !== "undefined" && "clearAppBadge" in navigator;
     if (!supported) return;
-    const onVisible = () => { if (document.visibilityState === "visible") clear(); };
-    document.addEventListener("visibilitychange", onVisible);
-    clear(); // clear any stale badge on a fresh open
-    return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [supported, clear]);
 
-  return { supported, bump, clear };
+    const clear = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      navigator.clearAppBadge?.().catch(() => {});
+    };
+
+    clear(); // clear on open
+    document.addEventListener("visibilitychange", clear);
+    window.addEventListener("focus", clear);
+    return () => {
+      document.removeEventListener("visibilitychange", clear);
+      window.removeEventListener("focus", clear);
+    };
+  }, []);
 }

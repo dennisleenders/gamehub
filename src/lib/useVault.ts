@@ -105,6 +105,22 @@ export function useVault(currentUserId: string, householdId: string) {
     return () => { supabase.removeChannel(ch); };
   }, [supabase, load, householdId]);
 
+  // Mobile PWAs (especially iOS) freeze the page — and with it the realtime
+  // socket — while backgrounded, so changes made by others while you were away
+  // never arrive and the stale socket doesn't catch up on return. Refetch whenever
+  // the app comes back to the foreground so the collection is current without a
+  // full restart. (supabase-js reconnects the socket itself; this just backfills
+  // the gap of events missed while frozen.)
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [load]);
+
   const saveGame = useCallback(async (g: Partial<Game> & { myStatus?: PlayStatus; myHours?: number }) => {
     const { id, progress, myStatus, myHours, ...fields } = g as any;
     let gameId = id;

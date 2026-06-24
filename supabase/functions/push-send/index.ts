@@ -69,6 +69,8 @@ Deno.serve(async (req) => {
       .eq("household_id", householdId)
       .neq("profile_id", user.id); // never notify the actor
 
+    console.log("push-send invoked", { caller: user.id, householdId, recipients: subs?.length ?? 0 });
+
     const notification = JSON.stringify({ title, body, url });
     const dead: string[] = [];
     let sent = 0;
@@ -82,13 +84,16 @@ Deno.serve(async (req) => {
         sent++;
       } catch (e) {
         // 404/410 = the endpoint is gone (unsubscribed / uninstalled). Prune it so
-        // the table doesn't accumulate dead devices.
+        // the table doesn't accumulate dead devices. Log every failure so a bad
+        // VAPID match / malformed key (other status codes) is visible.
         const code = (e as { statusCode?: number })?.statusCode;
+        console.error("push send failed", { code, message: String(e) });
         if (code === 404 || code === 410) dead.push(s.id);
       }
     }));
 
     if (dead.length) await admin.from("push_subscriptions").delete().in("id", dead);
+    console.log("push-send result", { sent, pruned: dead.length });
     return json({ sent, pruned: dead.length });
   } catch (e) {
     return json({ error: String(e) }, 500);

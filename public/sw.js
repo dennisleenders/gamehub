@@ -1,6 +1,6 @@
 // GameVault service worker — hand-rolled, zero deps. Bump CACHE_VERSION to force
 // clients to drop old caches after a deploy.
-const CACHE_VERSION = "gv-v2";
+const CACHE_VERSION = "gv-v3";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 
@@ -107,12 +107,23 @@ self.addEventListener("push", (event) => {
   try { data = event.data ? event.data.json() : {}; } catch { /* non-JSON push */ }
   const title = data.title || "GameVault";
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body: data.body || "",
-      icon: "/icons/192",
-      badge: "/icons/192",
-      data: { url: data.url || "/" },
-    }),
+    (async () => {
+      await self.registration.showNotification(title, {
+        body: data.body || "",
+        icon: "/icons/192",
+        badge: "/icons/192",
+        data: { url: data.url || "/" },
+      });
+      // Badge the app icon. This MUST happen in the SW: on iOS a backgrounded PWA
+      // is frozen, so only the push handler runs while the app is closed. Count =
+      // notifications still pending in the tray; cleared by the client on focus.
+      try {
+        if (self.navigator && self.navigator.setAppBadge) {
+          const pending = await self.registration.getNotifications();
+          await self.navigator.setAppBadge(pending.length || 1);
+        }
+      } catch { /* badging unsupported here */ }
+    })(),
   );
 });
 
