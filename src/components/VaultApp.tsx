@@ -17,6 +17,8 @@ import UpcomingView, { UpcomingRail, UpcomingCover, EventsRail, EventDetail } fr
 import { useUpcoming } from "@/lib/useUpcoming";
 import { useEvents } from "@/lib/useEvents";
 import { useAchievementToasts } from "@/components/useAchievementToasts";
+import { Confetti } from "@/components/achievements/Confetti";
+import type { UnlockEvent } from "@/lib/achievements";
 import { Avatar, AvatarPickerModal } from "@/components/Avatar";
 import Splash from "@/components/Splash";
 import TutorialOverlay, { type TutorialStep } from "@/components/TutorialOverlay";
@@ -84,7 +86,7 @@ const TUTORIAL_STEPS: TutorialStep[] = [
 
 export default function VaultApp({ currentUser, household, role }: { currentUser: Profile; household: Household; role: HouseholdRole }) {
   const uid = currentUser.id;
-  const { games, profiles, members, challenges, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences, saveProfile, renameVault, regenerateInvite, removeMember, leaveVault } = useVault(uid, household.id);
+  const { games, profiles, members, challenges, unlocks, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, recordUnlock, saveSettings, savePreferences, saveProfile, renameVault, regenerateInvite, removeMember, leaveVault } = useVault(uid, household.id);
   const userById = (id?: string | null) => profiles.find((p) => p.id === id) || null;
 
   // Live current profile (reflects reloads after saving prefs); falls back to the
@@ -157,9 +159,23 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
     return () => clearTimeout(t);
   }, [loading, minSplash, tutorialKey]);
 
-  // Pop a toast whenever you cross an achievement tier. Gated on !loading so the
-  // baseline is taken from fully-loaded data (no notification spam on first load).
-  useAchievementToasts(games, profiles, uid, !loading);
+  // Celebration: when a tier is crossed in-session, briefly glow the affected
+  // tiles and rain confetti over the page. Cleared after the burst.
+  const [justUnlocked, setJustUnlocked] = useState<Set<string>>(new Set());
+  const [confettiKey, setConfettiKey] = useState(0);
+  const celebrateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onCelebrate = useCallback((events: UnlockEvent[]) => {
+    setJustUnlocked(new Set(events.map((e) => e.achievementId)));
+    setConfettiKey((k) => k + 1);
+    if (celebrateTimer.current) clearTimeout(celebrateTimer.current);
+    celebrateTimer.current = setTimeout(() => { setJustUnlocked(new Set()); setConfettiKey(0); }, 2600);
+  }, []);
+  useEffect(() => () => { if (celebrateTimer.current) clearTimeout(celebrateTimer.current); }, []);
+
+  // Pop a toast whenever you cross an achievement tier, persist the unlock moment,
+  // and fire the celebration. Gated on !loading so the baseline is taken from
+  // fully-loaded data (no notification spam on first load).
+  useAchievementToasts(games, profiles, uid, !loading, { recordUnlock, onCelebrate });
 
   // Upcoming releases (IGDB) — fetched lazily, only once the dashboard block is
   // shown or the Upcoming view is opened, so we don't hit IGDB needlessly.
@@ -560,6 +576,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
             <h1 style={{ fontFamily: "var(--display)", fontSize: 28, fontWeight: 800, letterSpacing: -0.5, margin: "2px 2px 16px" }}>Achievements</h1>
           </div>
           <AchievementsView games={games} profiles={profiles} challenges={challenges} currentUser={me}
+            unlocks={unlocks} justUnlocked={justUnlocked}
             deleteChallenge={deleteChallenge}
             onCreateChallenge={() => setCreatingChallenge(true)} />
         </div>
@@ -625,6 +642,7 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
           onRenameVault={renameVault} onRegenerateInvite={regenerateInvite} onRemoveMember={removeMember} onLeaveVault={leaveVault}
           onSave={saveSettings} onSavePreferences={savePreferences} onClose={() => setSettingsOpen(false)} />
       )}
+      {confettiKey > 0 && <Confetti key={confettiKey} />}
       {creatingChallenge && (
         <CreateChallengeModal currentUser={me} onClose={() => setCreatingChallenge(false)}
           onSave={async (c) => { await saveChallenge(c); setCreatingChallenge(false); }} />

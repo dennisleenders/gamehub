@@ -122,6 +122,20 @@ export interface Challenge {
   updated_at?: string;
 }
 
+// A persisted achievement-tier unlock. Achievements themselves are computed live
+// (see lib/achievements.ts); only the unlock MOMENT is stored, because live data
+// can't reconstruct an accurate per-tier timestamp. Append-only — rows are never
+// auto-deleted, so the history/timeline stays truthful even if live progress
+// later regresses. The tier union is inlined (not imported from achievements.ts)
+// to avoid a types ↔ achievements import cycle.
+export interface AchievementUnlock {
+  id: string;
+  profile_id: string;
+  achievement_id: string;
+  tier: "bronze" | "silver" | "gold" | "platinum";
+  unlocked_at: string;
+}
+
 export interface Game {
   id: string;
   title: string;

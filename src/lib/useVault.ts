@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { DEFAULT_GENRES } from "@/lib/types";
-import type { Game, Profile, PlayStatus, Challenge, MemberWithProfile } from "@/lib/types";
+import type { Game, Profile, PlayStatus, Challenge, MemberWithProfile, AchievementUnlock } from "@/lib/types";
+import type { UnlockEvent } from "@/lib/achievements";
 
 // Central data layer. Replaces the PoC's in-memory state + window.storage with
 // live Supabase queries, while preserving the same shape the UI expects
@@ -21,6 +22,9 @@ export function useVault(currentUserId: string, householdId: string) {
   // Shared, household-wide challenges. Only the definitions live in the DB;
   // each user's progress is derived client-side from completions.
   const [challenges, setChallenges] = useState<Challenge[]>([]);
+  // Durable achievement-tier unlock history (timestamps). Achievements are still
+  // computed live; only the unlock moment is stored. See 0019_achievement_unlocks.
+  const [unlocks, setUnlocks] = useState<AchievementUnlock[]>([]);
   // Genres are a fixed, app-defined list — not user-editable.
   const genres = DEFAULT_GENRES;
   // Shared feature flag: whether FILL also fetches prices from the paid
@@ -33,7 +37,7 @@ export function useVault(currentUserId: string, householdId: string) {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const [{ data: gs }, { data: prog }, { data: profs }, { data: settings }, { data: runs }, { data: chals }, { data: mems }, { count: tokenCount }] = await Promise.all([
+    const [{ data: gs }, { data: prog }, { data: profs }, { data: settings }, { data: runs }, { data: chals }, { data: mems }, { data: unlockRows }, { count: tokenCount }] = await Promise.all([
       supabase.from("games").select("*").order("created_at", { ascending: false }),
       supabase.from("progress").select("*"),
       supabase.from("profiles").select("*"),
@@ -42,6 +46,7 @@ export function useVault(currentUserId: string, householdId: string) {
       supabase.from("playthroughs").select("*"),
       supabase.from("challenges").select("*").order("created_at", { ascending: false }),
       supabase.from("household_members").select("household_id, user_id, role, joined_at"),
+      supabase.from("achievement_unlocks").select("*").order("unlocked_at", { ascending: false }),
       // Head/count query: tells us a token exists without fetching its value.
       supabase.from("app_settings").select("key", { count: "exact", head: true }).eq("key", "pricecharting_token"),
     ]);
@@ -60,6 +65,7 @@ export function useVault(currentUserId: string, householdId: string) {
     setGames((gs ?? []).map((g: any) => ({ ...g, progress: byGame[g.id] ?? {}, playthroughs: runsByGame[g.id] ?? {} })));
     setProfiles(profs ?? []);
     setChallenges(chals ?? []);
+    setUnlocks(unlockRows ?? []);
     // Join memberships to their profiles for the member-management UI.
     const profById: Record<string, Profile> = {};
     (profs ?? []).forEach((p: any) => { profById[p.id] = p; });
@@ -91,6 +97,7 @@ export function useVault(currentUserId: string, householdId: string) {
       .on("postgres_changes", { event: "*", schema: "public", table: "app_settings", filter: hh }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "playthroughs", filter: hh }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "challenges", filter: hh }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "achievement_unlocks", filter: hh }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "household_members", filter: hh }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "households", filter: `id=eq.${householdId}` }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, load)
@@ -160,6 +167,21 @@ export function useVault(currentUserId: string, householdId: string) {
     await load();
   }, [supabase, load]);
 
+  // Persist in-session achievement unlocks (one row per newly crossed tier).
+  // Idempotent via the table's unique constraint, so a realtime-triggered
+  // re-evaluation that re-derives the same events is a harmless no-op. We don't
+  // call load() — realtime delivers the new rows — avoiding a double round-trip
+  // and any re-entrancy with the detector.
+  const recordUnlock = useCallback(async (events: UnlockEvent[]) => {
+    if (!events.length) return;
+    const rows = events.map((e) => ({
+      household_id: householdId, profile_id: currentUserId,
+      achievement_id: e.achievementId, tier: e.tier,
+    }));
+    await supabase.from("achievement_unlocks")
+      .upsert(rows, { onConflict: "household_id,profile_id,achievement_id,tier", ignoreDuplicates: true });
+  }, [supabase, currentUserId, householdId]);
+
   // Persist a shared setting: the PriceCharting feature flag or its token. Both
   // live in the app_settings store. An empty token deletes its row so the "token
   // saved" status stays accurate.
@@ -218,5 +240,5 @@ export function useVault(currentUserId: string, householdId: string) {
     if (error) throw error;
   }, [supabase]);
 
-  return { games, profiles, members, challenges, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, saveSettings, savePreferences, saveProfile, renameVault, regenerateInvite, removeMember, leaveVault, reload: load };
+  return { games, profiles, members, challenges, unlocks, genres, priceChartingEnabled, priceChartingTokenSet, loading, saveGame, deleteGame, saveChallenge, deleteChallenge, recordUnlock, saveSettings, savePreferences, saveProfile, renameVault, regenerateInvite, removeMember, leaveVault, reload: load };
 }

@@ -2,16 +2,19 @@
 
 import { useMemo, useState } from "react";
 import {
-  Trophy, Crown, Plus, X, Check, ChevronDown, Lock, Flag, Award, Hourglass, CalendarClock,
+  Trophy, Crown, Plus, X, Check, ChevronDown, Flag, Award, Hourglass, CalendarClock,
 } from "lucide-react";
-import type { Challenge, ChallengeType, Game, Profile } from "@/lib/types";
+import type { AchievementUnlock, Challenge, ChallengeType, Game, Profile } from "@/lib/types";
 import { fmtDate } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 import {
-  ACHIEVEMENTS, computeStatsByUser, computeRanking, challengeStandings, challengePhase,
-  evaluateAchievement, TOTAL_TIERS, TIER_COLOR, TIER_LABEL, type UserStats, type AchievementDef,
+  computeStatsByUser, computeRanking, challengeStandings, challengePhase,
+  highestTier, TOTAL_TIERS, type RankRow,
 } from "@/lib/achievements";
+import { HeroHeader } from "@/components/achievements/HeroHeader";
+import { AchievementGrid } from "@/components/achievements/AchievementGrid";
+import { MemberSheet } from "@/components/achievements/MemberSheet";
 
 const CHALLENGE_TYPES: [ChallengeType, string][] = [["complete_games", "Complete games"]];
 
@@ -26,25 +29,37 @@ function SectionHead({ icon: Icon, accent, action, children }: { icon: any; acce
 }
 
 export default function AchievementsView({
-  games, profiles, challenges, currentUser, deleteChallenge, onCreateChallenge,
+  games, profiles, challenges, currentUser, unlocks = [], justUnlocked, deleteChallenge, onCreateChallenge,
 }: {
   games: Game[];
   profiles: Profile[];
   challenges: Challenge[];
   currentUser: Profile;
+  unlocks?: AchievementUnlock[];
+  justUnlocked?: Set<string>;
   deleteChallenge: (id: string) => Promise<void> | void;
   onCreateChallenge: () => void;
 }) {
-  // Current user's stats drive the achievement tiles; the leaderboard computes
-  // its own ranking inside RankingBoard (shared with the dashboard).
-  const myStats = useMemo(() => computeStatsByUser(games, profiles).get(currentUser.id), [games, profiles, currentUser.id]);
+  // Compute the shared stats ONCE and pass them to every consumer (hero, ranking,
+  // grid, detail coverage) — avoids the previous triple computeStatsByUser.
+  const statsByUser = useMemo(() => computeStatsByUser(games, profiles), [games, profiles]);
+  const ranking = useMemo(() => computeRanking(statsByUser, profiles), [statsByUser, profiles]);
+  const myStats = statsByUser.get(currentUser.id);
+  const myRow = ranking.find((r) => r.profile.id === currentUser.id);
+  // A member tapped in the leaderboard opens their read-only achievement grid.
+  const [member, setMember] = useState<Profile | null>(null);
 
   return (
     <div className="fade" style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+      <HeroHeader profile={currentUser}
+        rank={myRow?.rank ?? 0} totalMembers={profiles.length}
+        points={myRow?.points ?? 0} tiersUnlocked={myRow?.tiers ?? 0}
+        totalTiers={TOTAL_TIERS} highest={highestTier(myStats)} />
+
       {/* ---- Ranking ---- */}
       <section>
         <SectionHead icon={Trophy} accent="var(--accent3)">RANKING</SectionHead>
-        <RankingBoard games={games} profiles={profiles} currentUser={currentUser} />
+        <RankingBoard games={games} profiles={profiles} currentUser={currentUser} ranking={ranking} onSelectMember={setMember} />
       </section>
 
       {/* ---- Challenges ---- */}
@@ -76,29 +91,45 @@ export default function AchievementsView({
       {/* ---- Achievements ---- */}
       <section>
         <SectionHead icon={Award} accent="var(--accent)">ACHIEVEMENTS</SectionHead>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
-          {ACHIEVEMENTS.map((def) => (
-            <AchievementTile key={def.id} def={def} stats={myStats} />
-          ))}
-        </div>
+        <AchievementGrid stats={myStats} statsByUser={statsByUser} profiles={profiles}
+          unlocks={unlocks} currentUserId={currentUser.id} justUnlocked={justUnlocked} />
       </section>
+
+      {member && (
+        <MemberSheet member={member} stats={statsByUser.get(member.id)} statsByUser={statsByUser}
+          profiles={profiles} unlocks={unlocks} currentUser={currentUser} onClose={() => setMember(null)} />
+      )}
     </div>
   );
 }
 
-// The points leaderboard. Self-contained (computes its own ranking) so it can be
-// dropped into both the Achievements page and the dashboard's togglable section.
-export function RankingBoard({ games, profiles, currentUser }: { games: Game[]; profiles: Profile[]; currentUser: Profile }) {
-  const ranking = useMemo(() => computeRanking(computeStatsByUser(games, profiles), profiles), [games, profiles]);
+// The points leaderboard. Used on both the Achievements page (where the parent
+// passes a precomputed `ranking` to avoid recomputing) and the dashboard (where
+// it falls back to computing its own from games/profiles). When `onSelectMember`
+// is provided, rows become buttons that open that member's achievement grid.
+export function RankingBoard({ games, profiles, currentUser, ranking: rankingProp, onSelectMember }: {
+  games: Game[];
+  profiles: Profile[];
+  currentUser: Profile;
+  ranking?: RankRow[];
+  onSelectMember?: (p: Profile) => void;
+}) {
+  const ranking = useMemo(
+    () => rankingProp ?? computeRanking(computeStatsByUser(games, profiles), profiles),
+    [rankingProp, games, profiles],
+  );
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {ranking.map((row) => {
         const mine = row.profile.id === currentUser.id;
         const top = row.rank === 1 && row.points > 0;
+        const clickable = !!onSelectMember;
+        const Tag: any = clickable ? "button" : "div";
         return (
-          <div key={row.profile.id} style={{
+          <Tag key={row.profile.id} onClick={clickable ? () => onSelectMember!(row.profile) : undefined} style={{
             display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: "var(--radius)",
             background: "var(--panel)", border: `1px solid ${mine ? row.profile.color : "var(--line)"}`,
+            width: "100%", textAlign: "left", font: "inherit", color: "var(--ink)", cursor: clickable ? "pointer" : "default",
           }}>
             <div style={{ width: 26, display: "grid", placeItems: "center", flexShrink: 0 }}>
               {top
@@ -118,7 +149,7 @@ export function RankingBoard({ games, profiles, currentUser }: { games: Game[]; 
               <span style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: 20, color: top ? "var(--accent3)" : "var(--ink)" }}>{row.points}</span>
               <span style={{ fontSize: 10, color: "var(--ink-dim)", fontFamily: "var(--display)", marginLeft: 5 }}>PTS</span>
             </div>
-          </div>
+          </Tag>
         );
       })}
     </div>
@@ -202,63 +233,6 @@ function ChallengeCard({ challenge: c, games, profiles, currentUser, onDelete }:
           <Trophy size={13} /> {leader.profile.name} {phase === "ended" ? "won" : "reached the goal"}!
         </div>
       )}
-    </div>
-  );
-}
-
-function AchievementTile({ def, stats }: { def: AchievementDef; stats: UserStats | undefined }) {
-  const p = evaluateAchievement(def, stats);
-  const started = p.stepsUnlocked > 0;
-  const maxed = p.nextStep === null;
-  const headColor = p.currentTier ? TIER_COLOR[p.currentTier] : "var(--ink-dim)";
-  const barColor = maxed ? TIER_COLOR.platinum : p.nextStep ? TIER_COLOR[p.nextStep.tier] : headColor;
-  return (
-    <div style={{
-      background: "var(--panel)", border: `1px solid ${started ? headColor : "var(--line)"}`,
-      borderRadius: "var(--radius)", padding: "14px 14px 13px", opacity: started ? 1 : 0.72,
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 9 }}>
-        <span style={{ display: "grid", placeItems: "center", width: 30, height: 30, borderRadius: 99, flexShrink: 0, background: started ? headColor : "var(--bg)", border: `1px solid ${started ? headColor : "var(--line)"}` }}>
-          {maxed ? <Crown size={15} color="var(--bg)" fill="var(--bg)" /> : started ? <Check size={15} strokeWidth={3} color="var(--bg)" /> : <Lock size={13} color="var(--ink-dim)" />}
-        </span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 800 }}>{def.name}</div>
-          <div style={{ fontSize: 8.5, letterSpacing: 1.2, fontFamily: "var(--display)", fontWeight: 700, color: headColor, marginTop: 1 }}>
-            {maxed ? "MAXED · PLATINUM" : p.currentTier ? TIER_LABEL[p.currentTier] : "LOCKED"}
-          </div>
-        </div>
-        <div style={{ textAlign: "right", flexShrink: 0 }}>
-          <span style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: 15, color: started ? headColor : "var(--ink-dim)" }}>{p.points}</span>
-          <span style={{ fontSize: 9, color: "var(--ink-dim)", fontFamily: "var(--display)" }}>/{p.maxPoints}</span>
-        </div>
-      </div>
-
-      <div style={{ fontSize: 11.5, color: "var(--ink-dim)", lineHeight: 1.4, marginBottom: 11, minHeight: "2.8em" }}>{def.description}</div>
-
-      {/* Tier steps: filled when reached, the next target outlined. */}
-      <div style={{ display: "flex", gap: 5, marginBottom: 10 }}>
-        {def.steps.map((st, i) => {
-          const reached = i < p.stepsUnlocked;
-          const isNext = i === p.stepsUnlocked;
-          const c = TIER_COLOR[st.tier];
-          return (
-            <div key={st.tier} style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ height: 5, borderRadius: 99, background: reached ? c : "var(--bg)", border: `1px solid ${reached || isNext ? c : "var(--line)"}` }} />
-              <div style={{ fontSize: 9, fontFamily: "var(--display)", fontWeight: 700, marginTop: 4, textAlign: "center", color: reached ? c : isNext ? "var(--ink)" : "var(--ink-dim)" }}>{st.target}</div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Progress toward the next tier (or "complete" when maxed). */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 10, color: "var(--ink-dim)", fontFamily: "var(--display)", marginBottom: 6 }}>
-        {maxed
-          ? <span style={{ color: TIER_COLOR.platinum }}>Fully complete</span>
-          : <><span>Next · {TIER_LABEL[p.nextStep!.tier]}</span><span>{Math.min(p.current, p.nextStep!.target)}/{p.nextStep!.target} {def.unit}</span></>}
-      </div>
-      <div style={{ height: 6, background: "var(--bg)", borderRadius: 99, overflow: "hidden", border: "1px solid var(--line)" }}>
-        <div style={{ height: "100%", width: `${p.pctToNext}%`, background: barColor, borderRadius: 99 }} />
-      </div>
     </div>
   );
 }
