@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { CalendarClock, Loader2, Heart, ChevronDown, ChevronRight, ChevronLeft, Grid2x2, LayoutGrid, List, X, SlidersHorizontal, Gamepad2, Radio, ExternalLink } from "lucide-react";
-import type { UpcomingGame, GameEvent } from "@/lib/types";
+import { igdbPlatformsToApp, type UpcomingGame, type GameEvent } from "@/lib/types";
 import { useLazyList } from "@/lib/useLazyList";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 
@@ -152,14 +153,7 @@ function EventLogo({ e, live }: { e: GameEvent; live: boolean }) {
   );
 }
 
-// Builds the heart's toggle: add when off, remove when on. Undefined for owned
-// games (can't wishlist something already in the collection) so the heart hides.
-function wishlistToggle(g: UpcomingGame, owned?: boolean, onWishlist?: (g: UpcomingGame) => Promise<void> | void, onUnwishlist?: (g: UpcomingGame) => Promise<void> | void) {
-  if (owned) return undefined;
-  return (next: boolean) => (next ? onWishlist?.(g) : onUnwishlist?.(g));
-}
-
-function UpcomingCard({ g, wishlisted, owned, onWishlist, onUnwishlist, onClick }: { g: UpcomingGame; wishlisted?: boolean; owned?: boolean; onWishlist?: (g: UpcomingGame) => Promise<void> | void; onUnwishlist?: (g: UpcomingGame) => Promise<void> | void; onClick?: () => void }) {
+function UpcomingCard({ g, wishlisted, owned, onWishlist, onUnwishlist, onClick }: { g: UpcomingGame; wishlisted?: boolean; owned?: boolean; onWishlist?: (g: UpcomingGame, platform: string) => Promise<void> | void; onUnwishlist?: (g: UpcomingGame) => Promise<void> | void; onClick?: () => void }) {
   return (
     <div style={{ position: "relative", minWidth: 0 }}>
       <button onClick={onClick} className="upcoming-card game-card" style={{ display: "flex", flexDirection: "column", gap: 9, color: "var(--ink)", minWidth: 0, width: "100%", background: "none", border: "none", padding: 0, textAlign: "left", font: "inherit", cursor: onClick ? "pointer" : "default" }}>
@@ -169,39 +163,114 @@ function UpcomingCard({ g, wishlisted, owned, onWishlist, onUnwishlist, onClick 
           <div style={{ fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--display)", marginTop: 5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.platforms.length ? platformLine(g.platforms) : (g.genre || "—")}</div>
         </div>
       </button>
-      <WishlistButton wishlisted={!!wishlisted} onToggle={wishlistToggle(g, owned, onWishlist, onUnwishlist)} />
+      <WishlistButton g={g} wishlisted={!!wishlisted} owned={owned} onWishlist={onWishlist} onUnwishlist={onUnwishlist} />
     </div>
   );
 }
 
-// Rounded heart pinned to a card/row's top corner: tap to add to the wishlist,
-// tap again to remove. The fill flips instantly (optimistic — no spinner) and the
-// write happens in the background; the prop reconciles it once the reload lands,
-// and a failed write reverts the fill. Hidden entirely when there's no action
-// (e.g. the game is already owned) and it isn't wishlisted.
-function WishlistButton({ wishlisted, onToggle, style }: { wishlisted: boolean; onToggle?: (next: boolean) => Promise<void> | void; style?: CSSProperties }) {
+// Rounded heart pinned to a card/row's top corner. Removing is one tap (the fill
+// clears instantly — optimistic, no spinner). Adding opens a small platform
+// picker anchored under the heart: the chosen platform is the one the game is
+// saved for. The picker closes without saving on any outside click, scroll, or
+// Escape. The fill only flips once a platform is picked; the reloaded prop then
+// reconciles it (and a failed write reverts it). Hidden for owned games.
+function WishlistButton({ g, wishlisted, owned, onWishlist, onUnwishlist, style }: { g: UpcomingGame; wishlisted: boolean; owned?: boolean; onWishlist?: (g: UpcomingGame, platform: string) => Promise<void> | void; onUnwishlist?: (g: UpcomingGame) => Promise<void> | void; style?: CSSProperties }) {
   // `optimistic` overrides the fill only while a write is in flight; clearing it
   // afterward hands control back to the reloaded prop (and reverts on failure).
   const [optimistic, setOptimistic] = useState<boolean | null>(null);
+  // When open, holds the viewport coords the picker is anchored to (below the heart).
+  const [picker, setPicker] = useState<{ top: number; right: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
   const on = optimistic ?? wishlisted;
-  if (!onToggle) return null; // no action available (e.g. already owned)
+
+  // Platforms offered in the picker: the game's platforms mapped to the app's
+  // names (falling back to the raw IGDB names), de-duped.
+  const platforms = useMemo(() => {
+    const mapped = igdbPlatformsToApp(g.platforms);
+    const list = mapped.length ? mapped : g.platforms;
+    return Array.from(new Set(list)).filter(Boolean);
+  }, [g.platforms]);
+
+  // While the picker is open, any outside pointer / scroll / resize / Escape
+  // closes it without saving. Scrolling inside the picker's own list is ignored.
+  useEffect(() => {
+    if (!picker) return;
+    const close = () => setPicker(null);
+    const onPointer = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (popRef.current?.contains(t) || btnRef.current?.contains(t)) return;
+      close();
+    };
+    const onScroll = (e: Event) => {
+      if (popRef.current?.contains(e.target as Node)) return;
+      close();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    document.addEventListener("pointerdown", onPointer, true);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer, true);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [picker]);
+
+  if (owned) return null; // already owned → no wishlist heart
+
   const base: CSSProperties = { position: "absolute", top: 7, right: 7, zIndex: 2, display: "grid", placeItems: "center", width: 28, height: 28, borderRadius: 99, background: "#13111ad0", backdropFilter: "blur(6px)", border: "none", padding: 0, cursor: "pointer", ...style };
+
+  const pick = (platform: string) => {
+    setPicker(null);
+    setOptimistic(true);
+    Promise.resolve(onWishlist?.(g, platform)).finally(() => setOptimistic(null));
+  };
+
   const click = (e: MouseEvent) => {
     e.stopPropagation();
-    const next = !on;
-    setOptimistic(next);
-    Promise.resolve(onToggle(next)).finally(() => setOptimistic(null));
+    if (on) { // filled → remove immediately
+      setOptimistic(false);
+      Promise.resolve(onUnwishlist?.(g)).finally(() => setOptimistic(null));
+      return;
+    }
+    if (picker) { setPicker(null); return; } // tapping the heart again closes the picker
+    if (platforms.length === 0) { pick("—"); return; } // nothing to choose — save with a placeholder
+    const rect = e.currentTarget.getBoundingClientRect();
+    setPicker({ top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) });
   };
+
   return (
-    <button onClick={click} aria-label={on ? "Remove from wishlist" : "Add to wishlist"} aria-pressed={on} style={base}>
-      <Heart size={14} color={on ? "var(--accent)" : "#fff"} fill={on ? "var(--accent)" : "none"} />
-    </button>
+    <>
+      <button ref={btnRef} onClick={click} aria-label={on ? "Remove from wishlist" : "Add to wishlist"} aria-pressed={on} aria-haspopup={!on ? "menu" : undefined} aria-expanded={picker ? true : undefined} style={base}>
+        <Heart size={14} color={on ? "var(--accent)" : "#fff"} fill={on ? "var(--accent)" : "none"} />
+      </button>
+      {picker && createPortal(
+        // Portaled to <body> so the fixed popover anchors to the viewport even
+        // inside a transformed ancestor (e.g. the `.sheet` slide animation, which
+        // would otherwise become its containing block).
+        <div ref={popRef} role="menu" onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: picker.top, right: picker.right, zIndex: 70, minWidth: 152, maxHeight: 248, overflowY: "auto", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", boxShadow: "0 12px 32px -8px #000", padding: 5 }}>
+          <div style={{ fontSize: 9.5, letterSpacing: 1.2, color: "var(--ink-dim)", fontFamily: "var(--display)", padding: "5px 8px 7px" }}>WISHLIST FOR</div>
+          {platforms.map((p) => (
+            <button key={p} role="menuitem" onClick={(e) => { e.stopPropagation(); pick(p); }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--panel-alt)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 9px", borderRadius: 8, background: "none", border: "none", color: "var(--ink)", fontSize: 13, fontWeight: 600, fontFamily: "var(--display)", cursor: "pointer" }}>
+              {p}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 
 // List-mode row: compact box-art thumbnail, then title + platforms, with the
 // release day trailing on the right. Mirrors the card's data, laid out wide.
-function UpcomingRow({ g, wishlisted, owned, onWishlist, onUnwishlist, onClick }: { g: UpcomingGame; wishlisted?: boolean; owned?: boolean; onWishlist?: (g: UpcomingGame) => Promise<void> | void; onUnwishlist?: (g: UpcomingGame) => Promise<void> | void; onClick?: () => void }) {
+function UpcomingRow({ g, wishlisted, owned, onWishlist, onUnwishlist, onClick }: { g: UpcomingGame; wishlisted?: boolean; owned?: boolean; onWishlist?: (g: UpcomingGame, platform: string) => Promise<void> | void; onUnwishlist?: (g: UpcomingGame) => Promise<void> | void; onClick?: () => void }) {
   const [err, setErr] = useState(false);
   const showArt = g.cover && !err;
   return (
@@ -221,7 +290,7 @@ function UpcomingRow({ g, wishlisted, owned, onWishlist, onUnwishlist, onClick }
           <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "var(--display)" }}>{fmtDay(g.releaseDate)}</span>
         </div>
       </button>
-      <WishlistButton wishlisted={!!wishlisted} onToggle={wishlistToggle(g, owned, onWishlist, onUnwishlist)} style={{ top: "50%", right: 10, transform: "translateY(-50%)" }} />
+      <WishlistButton g={g} wishlisted={!!wishlisted} owned={owned} onWishlist={onWishlist} onUnwishlist={onUnwishlist} style={{ top: "50%", right: 10, transform: "translateY(-50%)" }} />
     </div>
   );
 }
@@ -230,7 +299,7 @@ function UpcomingRow({ g, wishlisted, owned, onWishlist, onUnwishlist, onClick }
 // next 6 months of releases grouped by month (filterable by system/wishlist/
 // players, with two grid densities + a list view); "Events" is IGDB's industry
 // showcases split into upcoming / live now / passed.
-export default function UpcomingView({ games, loading, error, events, eventsLoading, eventsError, initialMode = "games", wishlistIds, ownedIds, onWishlist, onUnwishlist, onOpen, onOpenEvent }: { games: UpcomingGame[] | null; loading: boolean; error: boolean; events?: GameEvent[] | null; eventsLoading?: boolean; eventsError?: boolean; initialMode?: "games" | "events"; wishlistIds?: Set<number>; ownedIds?: Set<number>; onWishlist?: (g: UpcomingGame) => Promise<void> | void; onUnwishlist?: (g: UpcomingGame) => Promise<void> | void; onOpen?: (g: UpcomingGame) => void; onOpenEvent?: (e: GameEvent) => void }) {
+export default function UpcomingView({ games, loading, error, events, eventsLoading, eventsError, initialMode = "games", wishlistIds, ownedIds, onWishlist, onUnwishlist, onOpen, onOpenEvent }: { games: UpcomingGame[] | null; loading: boolean; error: boolean; events?: GameEvent[] | null; eventsLoading?: boolean; eventsError?: boolean; initialMode?: "games" | "events"; wishlistIds?: Set<number>; ownedIds?: Set<number>; onWishlist?: (g: UpcomingGame, platform: string) => Promise<void> | void; onUnwishlist?: (g: UpcomingGame) => Promise<void> | void; onOpen?: (g: UpcomingGame) => void; onOpenEvent?: (e: GameEvent) => void }) {
   const [mode, setMode] = useState<"games" | "events">(initialMode);
   const [system, setSystem] = useState("all");
   const [wish, setWish] = useState("all");
@@ -568,9 +637,9 @@ function EventsContent({ events, loading, error, onOpenEvent }: { events: GameEv
 }
 
 // A game announced at an event, as a compact row with a quick wishlist heart.
-// Reuses the shared WishlistButton (optimistic toggle) + wishlistToggle so the
+// Reuses the shared WishlistButton (platform picker + optimistic toggle) so the
 // behaviour matches the Upcoming cards; owned games show no heart.
-function EventGameRow({ g, wishlisted, owned, onWishlist, onUnwishlist }: { g: UpcomingGame; wishlisted?: boolean; owned?: boolean; onWishlist?: (g: UpcomingGame) => Promise<void> | void; onUnwishlist?: (g: UpcomingGame) => Promise<void> | void }) {
+function EventGameRow({ g, wishlisted, owned, onWishlist, onUnwishlist }: { g: UpcomingGame; wishlisted?: boolean; owned?: boolean; onWishlist?: (g: UpcomingGame, platform: string) => Promise<void> | void; onUnwishlist?: (g: UpcomingGame) => Promise<void> | void }) {
   const [err, setErr] = useState(false);
   const showArt = g.cover && !err;
   const sub = g.platforms.length ? platformLine(g.platforms) : (g.genre || (g.releaseDate ? String(new Date(g.releaseDate * 1000).getFullYear()) : "—"));
@@ -587,7 +656,7 @@ function EventGameRow({ g, wishlisted, owned, onWishlist, onUnwishlist }: { g: U
           <div style={{ fontSize: 10.5, color: "var(--ink-dim)", fontFamily: "var(--display)", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</div>
         </div>
       </div>
-      <WishlistButton wishlisted={!!wishlisted} onToggle={wishlistToggle(g, owned, onWishlist, onUnwishlist)} style={{ top: "50%", right: 9, transform: "translateY(-50%)" }} />
+      <WishlistButton g={g} wishlisted={!!wishlisted} owned={owned} onWishlist={onWishlist} onUnwishlist={onUnwishlist} style={{ top: "50%", right: 9, transform: "translateY(-50%)" }} />
     </div>
   );
 }
@@ -600,7 +669,7 @@ export function EventDetail({ event, wishlistIds, ownedIds, onWishlist, onUnwish
   event: GameEvent;
   wishlistIds?: Set<number>;
   ownedIds?: Set<number>;
-  onWishlist?: (g: UpcomingGame) => Promise<void> | void;
+  onWishlist?: (g: UpcomingGame, platform: string) => Promise<void> | void;
   onUnwishlist?: (g: UpcomingGame) => Promise<void> | void;
   onClose: () => void;
 }) {

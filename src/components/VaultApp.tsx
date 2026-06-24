@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
   Search, Plus, X, Gamepad2, Trophy, Heart, Disc, LayoutGrid, Sparkles, Check, Box, CircleUser,
   ChevronLeft, ChevronRight, ChevronDown, Pencil, Loader2, ImageIcon, Library, Joystick,
@@ -242,15 +242,15 @@ export default function VaultApp({ currentUser, household, role }: { currentUser
   );
 
   // One-tap wishlist straight from an Upcoming card — no detail modal. Enriches
-  // with the same best-effort IGDB metadata the modal's add does, assigns the
-  // first listed platform, then writes through saveGame.
-  const wishlistUpcoming = async (g: UpcomingGame) => {
+  // with the same best-effort IGDB metadata the modal's add does, saves it for the
+  // platform the user picked in the heart's popover, then writes through saveGame.
+  const wishlistUpcoming = async (g: UpcomingGame, platform: string) => {
     let meta: UpcomingMeta = null;
     try {
       const r = await fetch("/api/metadata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: g.title }) });
       if (r.ok) meta = await r.json();
     } catch { /* metadata is best-effort; add with the core fields regardless */ }
-    await saveGame(upcomingWishlistPayload(g, meta));
+    await saveGame(upcomingWishlistPayload(g, meta, platform));
   };
 
   // Tapping a filled heart removes the matching wishlist entry (deletes the row —
@@ -1230,13 +1230,15 @@ function DetailView({ game, userById, currentUser, onProgress, onClose, onEdit, 
 // Detail modal for an unreleased IGDB game from the Upcoming view. A trimmed
 // Shared shape for the best-effort IGDB enrichment, and the wishlist-add payload
 // builder — used by both the detail modal and the Upcoming card's quick-add so
-// the two stay identical (first listed platform, status wishlist, same fields).
+// the two stay identical (status wishlist, same fields). The saved `platform` is
+// the one the user picked in the heart's popover; absent that it falls back to
+// the first listed platform.
 type UpcomingMeta = { developer?: string; publisher?: string; description?: string; screenshots?: string[]; rating?: number | null } | null;
-function upcomingWishlistPayload(g: UpcomingGame, meta: UpcomingMeta): Partial<Game> {
+function upcomingWishlistPayload(g: UpcomingGame, meta: UpcomingMeta, platform?: string): Partial<Game> {
   const platforms = igdbPlatformsToApp(g.platforms);
   return {
     title: g.title,
-    platform: platforms[0] ?? g.platforms[0] ?? "—",
+    platform: platform ?? platforms[0] ?? g.platforms[0] ?? "—",
     platforms,
     status: "wishlist",
     cover: g.cover || null,
@@ -1266,6 +1268,18 @@ function UpcomingDetail({ g, existingStatus, onClose, onAdd }: {
   const [meta, setMeta] = useState<{ developer: string; publisher: string; description: string; screenshots: string[]; rating: number | null } | null>(null);
   const [metaLoading, setMetaLoading] = useState(true);
   const [adding, setAdding] = useState(false);
+  // When open, holds the viewport coords the platform picker is anchored to.
+  const [picker, setPicker] = useState<{ bottom: number; left: number; width: number } | null>(null);
+  const addBtnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+
+  // Platforms offered in the picker: the game's platforms mapped to the app's
+  // names (falling back to the raw IGDB names), de-duped.
+  const platforms = useMemo(() => {
+    const mapped = igdbPlatformsToApp(g.platforms);
+    const list = mapped.length ? mapped : g.platforms;
+    return Array.from(new Set(list)).filter(Boolean);
+  }, [g.platforms]);
 
   useEffect(() => {
     let active = true;
@@ -1279,6 +1293,33 @@ function UpcomingDetail({ g, existingStatus, onClose, onAdd }: {
     return () => { active = false; };
   }, [g.title]);
 
+  // While the picker is open, any outside pointer / scroll / resize / Escape
+  // closes it without adding. Scrolling inside the picker's own list is ignored.
+  useEffect(() => {
+    if (!picker) return;
+    const close = () => setPicker(null);
+    const onPointer = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (popRef.current?.contains(t) || addBtnRef.current?.contains(t)) return;
+      close();
+    };
+    const onScroll = (e: Event) => {
+      if (popRef.current?.contains(e.target as Node)) return;
+      close();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    document.addEventListener("pointerdown", onPointer, true);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer, true);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [picker]);
+
   const released = new Date(g.releaseDate * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
   const dim = (v: string) => (metaLoading ? "…" : v || "—");
   const facts: [string, string][] = [
@@ -1288,10 +1329,21 @@ function UpcomingDetail({ g, existingStatus, onClose, onAdd }: {
     ["Genre", g.genre || "—"],
   ];
 
-  const handleAdd = async () => {
+  const handleAdd = async (platform: string) => {
+    setPicker(null);
     setAdding(true);
-    await onAdd(upcomingWishlistPayload(g, meta));
+    await onAdd(upcomingWishlistPayload(g, meta, platform));
     setAdding(false);
+  };
+
+  // Tapping ADD TO WISHLIST opens the platform picker (anchored above the button)
+  // rather than adding straight away — the chosen platform is what the game is
+  // saved for. With nothing to choose, fall back to a placeholder and add directly.
+  const openPicker = (e: ReactMouseEvent) => {
+    if (picker) { setPicker(null); return; }
+    if (platforms.length === 0) { handleAdd("—"); return; }
+    const rect = e.currentTarget.getBoundingClientRect();
+    setPicker({ bottom: window.innerHeight - rect.top + 6, left: rect.left, width: rect.width });
   };
 
   return (
@@ -1341,13 +1393,26 @@ function UpcomingDetail({ g, existingStatus, onClose, onAdd }: {
                 <Box size={15} /> IN YOUR COLLECTION
               </div>
             ) : (
-              <button onClick={handleAdd} disabled={adding} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "13px", borderRadius: "var(--radius)", background: "var(--accent)", border: "none", color: "var(--bg)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 13, cursor: adding ? "default" : "pointer", opacity: adding ? 0.7 : 1 }}>
+              <button ref={addBtnRef} onClick={openPicker} disabled={adding} aria-haspopup="menu" aria-expanded={picker ? true : undefined} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "13px", borderRadius: "var(--radius)", background: "var(--accent)", border: "none", color: "var(--bg)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 13, cursor: adding ? "default" : "pointer", opacity: adding ? 0.7 : 1 }}>
                 {adding ? <Loader2 size={15} className="spin" /> : <Heart size={15} fill="var(--bg)" />} ADD TO WISHLIST
               </button>
             )}
           </div>
         </div>
       </div>
+      {picker && (
+        <div ref={popRef} role="menu" onClick={(e) => e.stopPropagation()} style={{ position: "fixed", bottom: picker.bottom, left: picker.left, width: picker.width, zIndex: 70, maxHeight: 248, overflowY: "auto", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: "var(--radius)", boxShadow: "0 12px 32px -8px #000", padding: 5 }}>
+          <div style={{ fontSize: 9.5, letterSpacing: 1.2, color: "var(--ink-dim)", fontFamily: "var(--display)", padding: "5px 8px 7px" }}>WISHLIST FOR</div>
+          {platforms.map((p) => (
+            <button key={p} role="menuitem" onClick={(e) => { e.stopPropagation(); handleAdd(p); }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--panel-alt)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 9px", borderRadius: 8, background: "none", border: "none", color: "var(--ink)", fontSize: 13.5, fontWeight: 600, fontFamily: "var(--display)", cursor: "pointer" }}>
+              {p}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
