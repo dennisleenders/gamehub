@@ -343,6 +343,34 @@ export const ACHIEVEMENTS: AchievementDef[] = [
 // Total tiers across the whole catalog — for the ranking subtitle.
 export const TOTAL_TIERS = ACHIEVEMENTS.reduce((n, d) => n + d.steps.length, 0);
 
+// ---- Categories ------------------------------------------------------------
+// Achievements are grouped into a handful of themed categories so the grid can
+// render collapsible sections (the full flat list is long). `icon` is a lucide
+// name string, mapped to a component in the UI layer (engine stays UI-free).
+export type AchievementCategory = "progress" | "mastery" | "exploration" | "collection" | "secret";
+
+export const CATEGORY_META: { id: AchievementCategory; label: string; icon: string }[] = [
+  { id: "progress", label: "Progress", icon: "TrendingUp" },
+  { id: "mastery", label: "Mastery", icon: "Swords" },
+  { id: "exploration", label: "Exploration", icon: "Compass" },
+  { id: "collection", label: "Collection", icon: "Library" },
+  { id: "secret", label: "Secret", icon: "Lock" },
+];
+
+// id → category. Kept as a map (rather than a field on every def) so the catalog
+// entries stay terse. Unlisted ids fall back to secret-if-hidden, else progress.
+const CATEGORY_OF: Record<string, AchievementCategory> = {
+  completionist: "progress", time_served: "progress", library_lord: "progress", productive_year: "progress", steady_hand: "progress",
+  encore: "mastery", marathoner: "mastery", speedrunner: "mastery", long_hauler: "mastery", genre_devotee: "mastery", console_loyalist: "mastery",
+  platform_hopper: "exploration", genre_explorer: "exploration", renaissance_gamer: "exploration", time_traveler: "exploration", retro_revivalist: "exploration", studio_tour: "exploration",
+  curator: "collection", big_spender: "collection", treasure_hunter: "collection", critic: "collection",
+  first_blood: "secret", deep_diver: "secret", night_owl: "secret", obsessed: "secret", its_not_you: "secret",
+};
+
+export function categoryOf(def: AchievementDef): AchievementCategory {
+  return CATEGORY_OF[def.id] ?? (def.hidden ? "secret" : "progress");
+}
+
 export interface AchievementProgress {
   def: AchievementDef;
   current: number;             // the metric value
