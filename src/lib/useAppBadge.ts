@@ -2,26 +2,32 @@
 
 import { useEffect } from "react";
 
-// Clears the home-screen app-icon badge whenever the app is open / brought to the
-// foreground. The badge is SET by the service worker's push handler (the only code
-// that runs while the app is closed on iOS) — this hook just makes sure it goes
-// away the moment you actually look at the app. No-op where badging is unsupported.
+// Keeps the home-screen app-icon badge honest. The badge is SET by the service
+// worker's push handler (the only code that runs while the app is closed on iOS),
+// where its value is the number of notifications still pending in the tray. This
+// hook, on open/foreground, both clears the badge AND dismisses those pending
+// notifications — otherwise old tray items keep inflating the next push's count
+// (you'd see 5, then 6, instead of 1). No-op where unsupported.
 export function useAppBadge() {
   useEffect(() => {
-    const supported = typeof navigator !== "undefined" && "clearAppBadge" in navigator;
-    if (!supported) return;
-
-    const clear = () => {
+    const onForeground = async () => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      navigator.clearAppBadge?.().catch(() => {});
+      if ("clearAppBadge" in navigator) navigator.clearAppBadge?.().catch(() => {});
+      try {
+        const reg = await navigator.serviceWorker?.ready;
+        const pending = (await reg?.getNotifications()) ?? [];
+        pending.forEach((n) => n.close());
+      } catch {
+        /* no SW / not supported */
+      }
     };
 
-    clear(); // clear on open
-    document.addEventListener("visibilitychange", clear);
-    window.addEventListener("focus", clear);
+    onForeground(); // clear on open
+    document.addEventListener("visibilitychange", onForeground);
+    window.addEventListener("focus", onForeground);
     return () => {
-      document.removeEventListener("visibilitychange", clear);
-      window.removeEventListener("focus", clear);
+      document.removeEventListener("visibilitychange", onForeground);
+      window.removeEventListener("focus", onForeground);
     };
   }, []);
 }
