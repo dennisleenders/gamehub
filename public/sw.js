@@ -1,6 +1,6 @@
 // GameVault service worker — hand-rolled, zero deps. Bump CACHE_VERSION to force
 // clients to drop old caches after a deploy.
-const CACHE_VERSION = "gv-v3";
+const CACHE_VERSION = "gv-v4";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 
@@ -102,6 +102,31 @@ self.addEventListener("fetch", (event) => {
 // Payload is { title, body, url } sent by the push-send Edge Function. On iOS
 // this only fires for an installed (home-screen) PWA; showNotification is
 // mandatory there (userVisibleOnly subscriptions must always show UI).
+// A tiny IndexedDB counter shared with the client (src/lib/useAppBadge.ts). The
+// badge can't be derived from the notification tray: iOS won't let JS dismiss an
+// already-delivered notification, so getNotifications() only ever grows. So we
+// keep our own count — incremented here per push (while the app isn't on screen),
+// reset to 0 by the client when you open the app.
+function badgeIdb(mode, run) {
+  return new Promise((resolve) => {
+    let open;
+    try { open = indexedDB.open("gv-badge", 1); } catch { resolve(undefined); return; }
+    open.onupgradeneeded = () => open.result.createObjectStore("kv");
+    open.onerror = () => resolve(undefined);
+    open.onsuccess = () => {
+      try { run(open.result.transaction("kv", mode).objectStore("kv"), resolve); }
+      catch { resolve(undefined); }
+    };
+  });
+}
+function bumpBadgeCount() {
+  return badgeIdb("readwrite", (store, resolve) => {
+    const get = store.get("count");
+    get.onsuccess = () => { const next = (Number(get.result) || 0) + 1; store.put(next, "count"); resolve(next); };
+    get.onerror = () => resolve(1);
+  });
+}
+
 self.addEventListener("push", (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { /* non-JSON push */ }
@@ -114,13 +139,16 @@ self.addEventListener("push", (event) => {
         badge: "/icons/192",
         data: { url: data.url || "/" },
       });
-      // Badge the app icon. This MUST happen in the SW: on iOS a backgrounded PWA
-      // is frozen, so only the push handler runs while the app is closed. Count =
-      // notifications still pending in the tray; cleared by the client on focus.
+      // Badge the icon — but only when the app isn't already on screen, and drive
+      // the number from our own counter (not the un-clearable tray) so it resets
+      // cleanly when you open the app. MUST run here: on iOS a backgrounded PWA is
+      // frozen, so the push handler is the only thing alive while the app is closed.
       try {
-        if (self.navigator && self.navigator.setAppBadge) {
-          const pending = await self.registration.getNotifications();
-          await self.navigator.setAppBadge(pending.length || 1);
+        const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+        const visible = wins.some((c) => c.visibilityState === "visible");
+        if (!visible && self.navigator && self.navigator.setAppBadge) {
+          const n = await bumpBadgeCount();
+          await self.navigator.setAppBadge(n);
         }
       } catch { /* badging unsupported here */ }
     })(),

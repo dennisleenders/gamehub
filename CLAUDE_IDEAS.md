@@ -31,6 +31,27 @@ Long-press the icon → "Scan barcode", "Add game", "Achievements". Not supporte
 ## Periodic Background Sync — Android only, gated
 Refresh upcoming releases / events overnight. Not supported on iOS.
 
+## Incremental realtime updates (reduce DB request volume)
+Today useVault.load() runs ~9 parallel queries (games, progress, profiles,
+settings, playthroughs, challenges, members, unlocks, token count) and is called
+on EVERY realtime change, for every connected device — so a single game INSERT
+costs ~9 queries × each online household member, plus a full re-pull of the whole
+vault (egress). It's simple but chatty, and it's the biggest lever on Supabase
+request volume + egress as usage grows.
+
+Fix: apply the realtime change payload to local state in place instead of
+re-running load(). Each postgres_changes handler already receives the new/old row
+(REPLICA IDENTITY FULL is on per 0016), so e.g. a games INSERT can append to the
+games array, an UPDATE can patch the matching row, a DELETE can drop it — no
+refetch. Keep load() only for the initial mount and the throttled foreground
+backfill. This turns "1 change = ~9 queries × N clients" into "1 change = 0
+queries" for the receivers.
+
+Watch out for: keeping the client-side joins consistent (games carry a per-user
+`progress` map + `playthroughs`), and ordering. Probably worth a small reducer
+keyed by table. Biggest win for scale; do it before the free-tier egress / 200
+concurrent realtime limits actually bite.
+
 ## Lower priority
 - Fullscreen API for collection browsing on a TV/second screen.
 - Gamepad API to navigate the collection / mark status with a controller.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { DEFAULT_GENRES } from "@/lib/types";
 import type { Game, Profile, PlayStatus, Challenge, MemberWithProfile, AchievementUnlock } from "@/lib/types";
@@ -107,18 +107,25 @@ export function useVault(currentUserId: string, householdId: string) {
 
   // Mobile PWAs (especially iOS) freeze the page — and with it the realtime
   // socket — while backgrounded, so changes made by others while you were away
-  // never arrive and the stale socket doesn't catch up on return. Refetch whenever
-  // the app comes back to the foreground so the collection is current without a
-  // full restart. (supabase-js reconnects the socket itself; this just backfills
-  // the gap of events missed while frozen.)
+  // never arrive and the stale socket doesn't catch up on return. Refetch when the
+  // app returns to the foreground to backfill that gap. (supabase-js reconnects the
+  // socket itself; this only covers events missed while frozen.)
+  //
+  // visibilitychange alone is enough for the PWA background→foreground case — we
+  // deliberately don't also listen to `focus` (the two double-fire on return, and
+  // each load() is ~9 queries). Throttled so rapid app-switching can't trigger a
+  // full reload every time.
+  const lastForegroundLoad = useRef(0);
   useEffect(() => {
-    const refresh = () => { if (document.visibilityState === "visible") load(); };
-    document.addEventListener("visibilitychange", refresh);
-    window.addEventListener("focus", refresh);
-    return () => {
-      document.removeEventListener("visibilitychange", refresh);
-      window.removeEventListener("focus", refresh);
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastForegroundLoad.current < 10_000) return;
+      lastForegroundLoad.current = now;
+      load();
     };
+    document.addEventListener("visibilitychange", refresh);
+    return () => document.removeEventListener("visibilitychange", refresh);
   }, [load]);
 
   const saveGame = useCallback(async (g: Partial<Game> & { myStatus?: PlayStatus; myHours?: number }) => {
